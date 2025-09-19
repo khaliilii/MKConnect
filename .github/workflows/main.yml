@@ -33,7 +33,7 @@ jobs:
           ext=""
           if [ "${{ matrix.os }}" = "windows" ]; then ext=".exe"; fi
           GOOS=${{ matrix.os }} GOARCH=${{ matrix.arch }} \
-          go build -o gocicd-${{ matrix.os }}-${{ matrix.arch }}$ext main.go
+          go build -o MKConnect-${{ matrix.os }}-${{ matrix.arch }}$ext main.go
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4

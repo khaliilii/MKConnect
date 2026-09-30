@@ -93,7 +93,6 @@ jobs:
         include:
           - { runner: ubuntu-latest, name: linux-amd64 }
           - { runner: ubuntu-24.04-arm, name: linux-arm64 }
-          - { runner: windows-latest, name: windows-amd64 }
           - { runner: macos-latest, name: macos-universal }
     runs-on: ${{ matrix.runner }}
     defaults:
@@ -122,12 +121,6 @@ jobs:
           go build -trimpath -tags "$BUILD_TAGS" -ldflags "-s -w $LDVERSION" -o dist/MKConnect ./cmd/mkconnect-gui
           cp cmd/mkconnect-gui/Icon.png dist/
           tar -C dist -czf "MKConnect-GUI-${{ matrix.name }}.tar.gz" MKConnect Icon.png
-
-      - name: Build (Windows)
-        if: runner.os == 'Windows'
-        run: |
-          go build -trimpath -tags "$BUILD_TAGS" -ldflags "-s -w -H=windowsgui $LDVERSION" -o dist/MKConnect.exe ./cmd/mkconnect-gui
-          cd dist && 7z a "../MKConnect-GUI-${{ matrix.name }}.zip" MKConnect.exe
 
       - name: Build (macOS universal .app)
         if: runner.os == 'macOS'
@@ -175,8 +168,53 @@ jobs:
           name: MKConnect-GUI-${{ matrix.name }}
           path: MKConnect-GUI-*
 
+  # Windows builds natively for every architecture with MSYS2's C toolchains
+  # (the Windows runner images no longer ship MinGW).
+  gui-windows:
+    needs: test
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { runner: windows-latest, arch: amd64, msystem: MINGW64, cc: mingw-w64-x86_64-gcc }
+          - { runner: windows-latest, arch: "386", msystem: MINGW32, cc: mingw-w64-i686-gcc }
+          - { runner: windows-11-arm, arch: arm64, msystem: CLANGARM64, cc: mingw-w64-clang-aarch64-clang }
+    runs-on: ${{ matrix.runner }}
+    defaults:
+      run:
+        shell: msys2 {0}
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+
+      - uses: msys2/setup-msys2@v2
+        with:
+          msystem: ${{ matrix.msystem }}
+          path-type: inherit # keep the Go from setup-go on PATH
+          install: ${{ matrix.cc }} zip
+
+      - name: Build
+        run: |
+          v="${GITHUB_REF_NAME}"
+          if [ "${GITHUB_REF_TYPE}" != "tag" ]; then v="dev-${GITHUB_SHA::7}"; fi
+          export CGO_ENABLED=1 GOARCH=${{ matrix.arch }}
+          if [ "${{ matrix.arch }}" = arm64 ]; then export CC=clang; else export CC=gcc; fi
+          go version
+          go build -trimpath -tags "$BUILD_TAGS" \
+            -ldflags "-s -w -H=windowsgui -X github.com/khaliilii/MKConnect/internal/version.Version=$v" \
+            -o dist/MKConnect.exe ./cmd/mkconnect-gui
+          cd dist && zip -9 "../MKConnect-GUI-windows-${{ matrix.arch }}.zip" MKConnect.exe
+
+      - uses: actions/upload-artifact@v5
+        with:
+          name: MKConnect-GUI-windows-${{ matrix.arch }}
+          path: MKConnect-GUI-*
+
   # Targets without a native runner or C toolchain are cross-compiled in
-  # fyne-cross's Docker images (Linux 386/armv7, Windows 386/arm64, Android).
+  # fyne-cross's Docker images (Linux 386/armv7, Android).
   gui-cross:
     needs: test
     runs-on: ubuntu-latest
@@ -191,8 +229,6 @@ jobs:
         include:
           - { os: linux, arch: "386" }
           - { os: linux, arch: arm }
-          - { os: windows, arch: "386" }
-          - { os: windows, arch: arm64 }
           - { os: android, arch: arm64 }
           - { os: android, arch: arm }
           - { os: android, arch: amd64 }
@@ -212,9 +248,10 @@ jobs:
           v="${GITHUB_REF_NAME}"
           if [ "${GITHUB_REF_TYPE}" != "tag" ]; then v="dev-${GITHUB_SHA::7}"; fi
           # The images ship an older Go; GOTOOLCHAIN=auto fetches the one go.mod asks for.
+          # fyne-cross splits -ldflags on spaces, so -X must use the -X=name=value form.
           fyne-cross ${{ matrix.os }} -arch=${{ matrix.arch }} \
             -tags "$BUILD_TAGS" \
-            -ldflags "-X github.com/khaliilii/MKConnect/internal/version.Version=$v" \
+            -ldflags "-X=github.com/khaliilii/MKConnect/internal/version.Version=$v" \
             -env GOTOOLCHAIN=auto \
             -app-id com.khaliilii.mkconnect -name MKConnect \
             -icon cmd/mkconnect-gui/Icon.png \
@@ -238,7 +275,7 @@ jobs:
           path: MKConnect-GUI-*
 
   release:
-    needs: [build, gui, gui-cross]
+    needs: [build, gui, gui-windows, gui-cross]
     runs-on: ubuntu-latest
     if: startsWith(github.ref, 'refs/tags/v')
     steps:

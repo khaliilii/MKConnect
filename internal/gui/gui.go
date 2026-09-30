@@ -36,8 +36,8 @@ type ui struct {
 
 	profilesPanel *fyne.Container
 	list          *widget.List
-	visible   []int // indices into store.Profiles shown in the list
-	emptyHint *widget.Label
+	visible       []int // indices into store.Profiles shown in the list
+	emptyHint     *widget.Label
 
 	groupFilter    string            // filterAll, filterUngrouped or a group id
 	groupLabels    map[string]string // group picker label -> filter value

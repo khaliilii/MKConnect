@@ -25,10 +25,10 @@ var typeLabels = map[string]string{
 
 // Group filter values besides group ids.
 const (
-	filterAll        = "*"
-	filterUngrouped  = ""
-	labelAllGroups   = "All accounts"
-	labelUngrouped   = "Ungrouped"
+	filterAll       = "*"
+	filterUngrouped = ""
+	labelAllGroups  = "All accounts"
+	labelUngrouped  = "Ungrouped"
 )
 
 func (u *ui) newProfilesPanel() fyne.CanvasObject {

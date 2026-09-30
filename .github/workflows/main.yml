@@ -243,17 +243,31 @@ jobs:
       - name: Install fyne-cross
         run: go install github.com/fyne-io/fyne-cross@latest
 
+      # The images ship an older Go. Put this Go's toolchain into fyne-cross's
+      # cache (mounted as /go) so the container doesn't download it mid-build:
+      # the "go: downloading" message breaks `fyne package`'s metadata step.
+      - name: Pre-fetch Go toolchain for the container
+        run: |
+          gv=$(go env GOVERSION)
+          echo "CONTAINER_GO=$gv" >> "$GITHUB_ENV"
+          GOTOOLCHAIN=local GOFLAGS=-modcacherw GOMODCACHE="$HOME/.cache/fyne-cross/pkg/mod" \
+            go mod download golang.org/toolchain@v0.0.1-$gv.linux-amd64
+
       - name: Build
         run: |
           v="${GITHUB_REF_NAME}"
           if [ "${GITHUB_REF_TYPE}" != "tag" ]; then v="dev-${GITHUB_SHA::7}"; fi
-          # The images ship an older Go; GOTOOLCHAIN=auto fetches the one go.mod asks for.
+          # `fyne package` overrides -ldflags, so the app also gets the version as
+          # metadata (x.y.z; the About dialog falls back to it).
+          appv="${GITHUB_REF_NAME#v}"; appv="${appv%%-*}"
+          if [ "${GITHUB_REF_TYPE}" != "tag" ]; then appv="0.0.${GITHUB_RUN_NUMBER}"; fi
           # fyne-cross splits -ldflags on spaces, so -X must use the -X=name=value form.
           fyne-cross ${{ matrix.os }} -arch=${{ matrix.arch }} \
             -tags "$BUILD_TAGS" \
             -ldflags "-X=github.com/khaliilii/MKConnect/internal/version.Version=$v" \
-            -env GOTOOLCHAIN=auto \
+            -env GOTOOLCHAIN="$CONTAINER_GO" \
             -app-id com.khaliilii.mkconnect -name MKConnect \
+            -app-version "$appv" -app-build "${GITHUB_RUN_NUMBER}" \
             -icon cmd/mkconnect-gui/Icon.png \
             ./cmd/mkconnect-gui 2>&1 | tee build.log || { report build.log; exit 1; }
           ls -lR fyne-cross/dist

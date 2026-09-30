@@ -18,7 +18,7 @@ func (u *ui) showAbout() {
 	icon.SetMinSize(fyne.NewSize(72, 72))
 
 	title := widget.NewLabelWithStyle("MKConnect", fyne.TextAlignCenter, fyne.TextStyle{Bold: true})
-	ver := widget.NewLabelWithStyle("Version "+version.Version, fyne.TextAlignCenter, fyne.TextStyle{})
+	ver := widget.NewLabelWithStyle("Version "+appVersion(u.app), fyne.TextAlignCenter, fyne.TextStyle{})
 	desc := widget.NewLabelWithStyle("SSH, VMess, VLESS, Trojan and Shadowsocks client\nwith proxy, LAN sharing and TUN modes.", fyne.TextAlignCenter, fyne.TextStyle{})
 
 	profileURL, _ := url.Parse(version.AuthorURL)
@@ -33,4 +33,17 @@ func (u *ui) showAbout() {
 		by, author, project,
 	)
 	dialog.ShowCustom("About", "Close", content, u.win)
+}
+
+// appVersion prefers the version injected with -ldflags; packaged builds made
+// by `fyne package` (fyne-cross, Android) override ldflags, so fall back to the
+// version recorded in the app metadata.
+func appVersion(a fyne.App) string {
+	if version.Version != "dev" {
+		return version.Version
+	}
+	if v := a.Metadata().Version; v != "" && v != "0.0.0" {
+		return v
+	}
+	return version.Version
 }

@@ -2,66 +2,95 @@ name: MKConnect CI/CD
 
 on:
   push:
-    tags:
-      - "v*.*.*"
+    branches: ["**"]
+    tags: ["v*.*.*"]
   pull_request:
-    branches:
-      - "main"
+    branches: ["main"]
 
 permissions:
-  contents: write   # 👈 برای ساخت Release لازمه
+  contents: write # needed to create releases
+
+env:
+  BUILD_TAGS: with_gvisor,with_quic,with_utls
 
 jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      - name: Vet
+        run: go vet -tags "$BUILD_TAGS" ./...
+
+      - name: Test
+        run: go test -race -tags "$BUILD_TAGS" ./...
+
   build:
+    needs: test
     runs-on: ubuntu-latest
     strategy:
+      fail-fast: false
       matrix:
-        os: [linux, windows, darwin]
-        arch: [amd64, arm64]
+        include:
+          - { goos: linux, goarch: amd64 }
+          - { goos: linux, goarch: arm64 }
+          - { goos: linux, goarch: "386" }
+          - { goos: linux, goarch: arm, goarm: "7" }
+          - { goos: windows, goarch: amd64 }
+          - { goos: windows, goarch: arm64 }
+          - { goos: windows, goarch: "386" }
+          - { goos: darwin, goarch: amd64 }
+          - { goos: darwin, goarch: arm64 }
+          - { goos: android, goarch: arm64 }
 
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
-      - name: Set up Go
-        uses: actions/setup-go@v5
+      - uses: actions/setup-go@v5
         with:
-          go-version: "1.22"
+          go-version-file: go.mod
 
-      - name: Build binary
+      - name: Build
+        env:
+          GOOS: ${{ matrix.goos }}
+          GOARCH: ${{ matrix.goarch }}
+          GOARM: ${{ matrix.goarm }}
+          CGO_ENABLED: "0"
         run: |
-          ext=""
-          if [ "${{ matrix.os }}" = "windows" ]; then ext=".exe"; fi
-          GOOS=${{ matrix.os }} GOARCH=${{ matrix.arch }} \
-          go build -o MKConnect-${{ matrix.os }}-${{ matrix.arch }}$ext main.go
+          name="MKConnect-${GOOS}-${GOARCH}${GOARM:+v$GOARM}"
+          if [ "$GOOS" = "windows" ]; then name="$name.exe"; fi
+          version="${GITHUB_REF_NAME}"
+          if [ "${GITHUB_REF_TYPE}" != "tag" ]; then version="dev-${GITHUB_SHA::7}"; fi
+          go build -trimpath -tags "$BUILD_TAGS" \
+            -ldflags "-s -w -X github.com/khaliilii/MKConnect/internal/cli.Version=${version}" \
+            -o "dist/$name" .
+          ls -lh dist/
 
-      - name: Upload artifact
-        uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v4
         with:
-          name: MKConnect-${{ matrix.os }}-${{ matrix.arch }}
-          path: MKConnect-${{ matrix.os }}-${{ matrix.arch }}*
+          name: MKConnect-${{ matrix.goos }}-${{ matrix.goarch }}${{ matrix.goarm && format('v{0}', matrix.goarm) || '' }}
+          path: dist/*
 
   release:
     needs: build
     runs-on: ubuntu-latest
     if: startsWith(github.ref, 'refs/tags/v')
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-
-      - name: Download build artifacts
-        uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v4
         with:
-          path: artifacts/
+          path: dist/
           merge-multiple: true
 
-      - name: List downloaded artifacts
-        run: ls -lh artifacts/
+      - name: Checksums
+        run: cd dist && sha256sum MKConnect-* > SHA256SUMS && cat SHA256SUMS
 
-      - name: Create GitHub Release
-        uses: softprops/action-gh-release@v2
+      - uses: softprops/action-gh-release@v2
         with:
-          files: artifacts/MKConnect-*
+          files: |
+            dist/MKConnect-*
+            dist/SHA256SUMS
           generate_release_notes: true
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

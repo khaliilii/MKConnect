@@ -1,0 +1,9 @@
+.DS_Store
+/dist/
+/MKConnect*
+/mkconnect
+*.exe
+
+# v1 config and any local profile files hold credentials
+config.json
+profiles.json

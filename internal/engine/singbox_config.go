@@ -197,7 +197,11 @@ func singBoxTransport(t *profile.Transport) (obj, error) {
 	case "grpc":
 		return obj{"type": "grpc", "service_name": t.ServiceName}, nil
 	case "httpupgrade":
-		return obj{"type": "httpupgrade", "host": t.Host, "path": t.Path}, nil
+		up := obj{"type": "httpupgrade", "path": t.Path}
+		if t.Host != "" {
+			up["host"] = t.Host
+		}
+		return up, nil
 	case "xhttp":
 		return nil, fmt.Errorf("sing-box does not support the xhttp transport, use the xray core")
 	}

@@ -180,6 +180,11 @@ jobs:
   gui-cross:
     needs: test
     runs-on: ubuntu-latest
+    defaults:
+      run:
+        shell: bash -o pipefail -e {0}
+    env:
+      BASH_ENV: .github/report.sh
     strategy:
       fail-fast: false
       matrix:
@@ -213,7 +218,7 @@ jobs:
             -env GOTOOLCHAIN=auto \
             -app-id com.khaliilii.mkconnect -name MKConnect \
             -icon cmd/mkconnect-gui/Icon.png \
-            ./cmd/mkconnect-gui
+            ./cmd/mkconnect-gui 2>&1 | tee build.log || { report build.log; exit 1; }
           ls -lR fyne-cross/dist
 
       - name: Rename

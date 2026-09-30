@@ -11,6 +11,7 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+	"time"
 
 	"golang.org/x/crypto/ssh"
 	"golang.org/x/net/proxy"
@@ -102,22 +103,35 @@ func sshTestProfile(t *testing.T, addr string) profile.Profile {
 // getThroughSOCKS fetches url via the local SOCKS5 proxy.
 func getThroughSOCKS(t *testing.T, port int, user, pass, url string) string {
 	t.Helper()
+	return getThroughSOCKSAt(t, "127.0.0.1", port, user, pass, url)
+}
+
+func getThroughSOCKSAt(t *testing.T, host string, port int, user, pass, url string) string {
+	t.Helper()
+	body, err := tryThroughSOCKSAt(host, port, user, pass, url)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return body
+}
+
+func tryThroughSOCKSAt(host string, port int, user, pass, url string) (string, error) {
 	var auth *proxy.Auth
 	if user != "" {
 		auth = &proxy.Auth{User: user, Password: pass}
 	}
-	dialer, err := proxy.SOCKS5("tcp", net.JoinHostPort("127.0.0.1", strconv.Itoa(port)), auth, proxy.Direct)
+	dialer, err := proxy.SOCKS5("tcp", net.JoinHostPort(host, strconv.Itoa(port)), auth, proxy.Direct)
 	if err != nil {
-		t.Fatal(err)
+		return "", err
 	}
-	client := &http.Client{Transport: &http.Transport{Dial: dialer.Dial}}
+	client := &http.Client{Transport: &http.Transport{Dial: dialer.Dial}, Timeout: 10 * time.Second}
 	resp, err := client.Get(url)
 	if err != nil {
-		t.Fatal(err)
+		return "", err
 	}
 	defer resp.Body.Close()
-	body, _ := io.ReadAll(resp.Body)
-	return string(body)
+	body, err := io.ReadAll(resp.Body)
+	return string(body), err
 }
 
 func newTarget(t *testing.T) *httptest.Server {

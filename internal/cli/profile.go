@@ -2,12 +2,9 @@ package cli
 
 import (
 	"fmt"
-	"io"
-	"net/http"
 	"os"
 	"strings"
 	"text/tabwriter"
-	"time"
 
 	"github.com/spf13/cobra"
 	"github.com/spf13/pflag"
@@ -348,7 +345,7 @@ func newProfileImportCmd() *cobra.Command {
 				text.WriteString("\n")
 			}
 			if subURL != "" {
-				data, err := fetchSubscription(subURL)
+				data, err := profile.FetchSubscription(subURL)
 				if err != nil {
 					return err
 				}
@@ -395,19 +392,6 @@ func newProfileImportCmd() *cobra.Command {
 	cmd.Flags().StringVar(&subURL, "url", "", "subscription URL")
 	cmd.Flags().StringVar(&legacy, "legacy", "", "MKConnect v1 config.json to migrate")
 	return cmd
-}
-
-func fetchSubscription(u string) ([]byte, error) {
-	client := &http.Client{Timeout: 30 * time.Second}
-	resp, err := client.Get(u)
-	if err != nil {
-		return nil, err
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("subscription: HTTP %s", resp.Status)
-	}
-	return io.ReadAll(io.LimitReader(resp.Body, 10<<20))
 }
 
 func printIf(label, v string) {

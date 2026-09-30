@@ -23,6 +23,9 @@ jobs:
         with:
           go-version-file: go.mod
 
+      - name: Install GUI build dependencies
+        run: sudo apt-get update && sudo apt-get install -y gcc libgl1-mesa-dev xorg-dev libxkbcommon-dev
+
       - name: Vet
         run: go vet -tags "$BUILD_TAGS" ./...
 
@@ -75,8 +78,92 @@ jobs:
           name: MKConnect-${{ matrix.goos }}-${{ matrix.goarch }}${{ matrix.goarm && format('v{0}', matrix.goarm) || '' }}
           path: dist/*
 
+  gui:
+    needs: test
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { runner: ubuntu-latest, name: linux-amd64 }
+          - { runner: ubuntu-24.04-arm, name: linux-arm64 }
+          - { runner: windows-latest, name: windows-amd64 }
+          - { runner: macos-latest, name: macos-universal }
+    runs-on: ${{ matrix.runner }}
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      - name: Install Linux GUI dependencies
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y gcc libgl1-mesa-dev xorg-dev libxkbcommon-dev
+
+      - name: Build (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          go build -trimpath -tags "$BUILD_TAGS" -ldflags "-s -w" -o dist/MKConnect ./cmd/mkconnect-gui
+          cp cmd/mkconnect-gui/Icon.png dist/
+          tar -C dist -czf "MKConnect-GUI-${{ matrix.name }}.tar.gz" MKConnect Icon.png
+
+      - name: Build (Windows)
+        if: runner.os == 'Windows'
+        run: |
+          go build -trimpath -tags "$BUILD_TAGS" -ldflags "-s -w -H=windowsgui" -o dist/MKConnect.exe ./cmd/mkconnect-gui
+          cd dist && 7z a "../MKConnect-GUI-${{ matrix.name }}.zip" MKConnect.exe
+
+      - name: Build (macOS universal .app)
+        if: runner.os == 'macOS'
+        run: |
+          export CGO_ENABLED=1
+          GOARCH=arm64 go build -trimpath -tags "$BUILD_TAGS" -ldflags "-s -w" -o dist/mk-arm64 ./cmd/mkconnect-gui
+          GOARCH=amd64 CGO_CFLAGS="-arch x86_64" CGO_LDFLAGS="-arch x86_64" \
+            go build -trimpath -tags "$BUILD_TAGS" -ldflags "-s -w" -o dist/mk-amd64 ./cmd/mkconnect-gui
+
+          app=dist/MKConnect.app
+          mkdir -p "$app/Contents/MacOS" "$app/Contents/Resources"
+          lipo -create -output "$app/Contents/MacOS/MKConnect" dist/mk-arm64 dist/mk-amd64
+
+          iconset=dist/MKConnect.iconset
+          mkdir -p "$iconset"
+          for size in 16 32 128 256 512; do
+            sips -z $size $size cmd/mkconnect-gui/Icon.png --out "$iconset/icon_${size}x${size}.png" >/dev/null
+            sips -z $((size*2)) $((size*2)) cmd/mkconnect-gui/Icon.png --out "$iconset/icon_${size}x${size}@2x.png" >/dev/null
+          done
+          iconutil -c icns "$iconset" -o "$app/Contents/Resources/MKConnect.icns"
+
+          version="${GITHUB_REF_NAME#v}"
+          if [ "${GITHUB_REF_TYPE}" != "tag" ]; then version="0.0.0"; fi
+          cat > "$app/Contents/Info.plist" <<PLIST
+          <?xml version="1.0" encoding="UTF-8"?>
+          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+          <plist version="1.0"><dict>
+            <key>CFBundleName</key><string>MKConnect</string>
+            <key>CFBundleDisplayName</key><string>MKConnect</string>
+            <key>CFBundleIdentifier</key><string>com.khaliilii.mkconnect</string>
+            <key>CFBundleExecutable</key><string>MKConnect</string>
+            <key>CFBundleIconFile</key><string>MKConnect.icns</string>
+            <key>CFBundlePackageType</key><string>APPL</string>
+            <key>CFBundleShortVersionString</key><string>${version}</string>
+            <key>CFBundleVersion</key><string>${version}</string>
+            <key>LSMinimumSystemVersion</key><string>11.0</string>
+            <key>NSHighResolutionCapable</key><true/>
+          </dict></plist>
+          PLIST
+          codesign --force --deep --sign - "$app"
+          ditto -c -k --keepParent "$app" "MKConnect-GUI-${{ matrix.name }}.zip"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: MKConnect-GUI-${{ matrix.name }}
+          path: MKConnect-GUI-*
+
   release:
-    needs: build
+    needs: [build, gui]
     runs-on: ubuntu-latest
     if: startsWith(github.ref, 'refs/tags/v')
     steps:

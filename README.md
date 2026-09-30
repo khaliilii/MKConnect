@@ -16,7 +16,21 @@ A multi-account client for **SSH, VMess, VLESS, Trojan and Shadowsocks**, with a
 - SSH host keys are pinned on first connect (trust on first use), and a changed key is refused
 - Profiles are stored in `<user config dir>/mkconnect/profiles.json` with owner-only permissions
 
-## Usage
+## Desktop app
+
+`MKConnect` (from the `MKConnect-GUI-*` release files) is the desktop app for Linux, Windows and macOS:
+
+- account list with **Add** (form per protocol), **Import** (links, clipboard or subscription URL), edit, copy share link and delete
+- core, mode (Proxy / TUN), local port, LAN sharing and proxy password, all saved as you change them
+- one-click connect / disconnect; selecting another account while connected switches to it
+- live logs from the cores, and a tray icon that keeps the connection running when the window is closed
+
+For TUN mode start the app with administrator rights (`sudo` on Linux/macOS, "Run as administrator" on Windows).
+The macOS app is not notarized; after unzipping run `xattr -dr com.apple.quarantine MKConnect.app` once.
+
+The desktop app and the CLI share the same profiles file. Set `MKCONNECT_CONFIG` to use a different one.
+
+## Command line
 
 ```sh
 # add accounts
@@ -56,7 +70,11 @@ sudo mkconnect run germany --mode tun --lan
 Requires Go 1.26.
 
 ```sh
+# command line (pure Go, cross-compiles anywhere)
 go build -trimpath -tags with_gvisor,with_quic,with_utls -ldflags "-s -w" .
+
+# desktop app (needs a C compiler; on Linux also: libgl1-mesa-dev xorg-dev libxkbcommon-dev)
+go build -trimpath -tags with_gvisor,with_quic,with_utls -ldflags "-s -w" ./cmd/mkconnect-gui
 ```
 
 Add `-tags no_xray` or `-tags no_singbox` to leave a core out and get a smaller binary. TUN mode needs the sing-box core.
@@ -65,6 +83,5 @@ Releases for Linux, Windows, macOS and Android (CLI) on amd64 / arm64 / 386 / ar
 
 ## Roadmap
 
-- Desktop GUI (Fyne)
 - Gateway mode (share the TUN with other devices) and hotspot helpers
 - Android app with a background VPN service

@@ -95,8 +95,11 @@ type Store struct {
 	path string
 }
 
-// DefaultPath returns <user config dir>/mkconnect/profiles.json.
+// DefaultPath returns $MKCONNECT_CONFIG, or <user config dir>/mkconnect/profiles.json.
 func DefaultPath() (string, error) {
+	if p := os.Getenv("MKCONNECT_CONFIG"); p != "" {
+		return p, nil
+	}
 	dir, err := os.UserConfigDir()
 	if err != nil {
 		return "", err

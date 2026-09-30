@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"net"
+	"runtime"
 	"strconv"
 	"strings"
 	"time"
@@ -48,11 +49,15 @@ func (u *ui) newConnectionPanel() fyne.CanvasObject {
 		container.NewBorder(nil, nil, widget.NewLabel("Config format"), nil, extKind),
 	)
 
-	mode := widget.NewRadioGroup(modeLabels, nil)
+	labels := modeLabels
+	if isMobile {
+		labels = modeLabels[:1] // TUN on Android needs the VPN service (planned)
+	}
+	mode := widget.NewRadioGroup(labels, nil)
 	mode.Horizontal = true
 	mode.Required = true
 	mode.SetSelected(labelFor(modeValues, modeLabels, s.Mode))
-	tunWarning := widget.NewLabel("TUN mode needs administrator rights: start MKConnect with sudo (Linux/macOS) or \"Run as administrator\" (Windows).")
+	tunWarning := widget.NewLabel(tunPrivilegeHint())
 	tunWarning.Wrapping = fyne.TextWrapWord
 	tunWarning.Importance = widget.WarningImportance
 
@@ -337,4 +342,11 @@ func (u *ui) newSessionBox(relayout func()) fyne.CanvasObject {
 		}
 	}()
 	return box
+}
+
+func tunPrivilegeHint() string {
+	if runtime.GOOS == "windows" {
+		return "TUN mode needs administrator rights: right-click MKConnect and choose \"Run as administrator\"."
+	}
+	return "TUN mode needs root: start MKConnect with sudo."
 }

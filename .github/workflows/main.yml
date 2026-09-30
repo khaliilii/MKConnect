@@ -31,7 +31,7 @@ jobs:
           go-version-file: go.mod
 
       - name: Install GUI build dependencies
-        run: sudo apt-get update && sudo apt-get install -y gcc libgl1-mesa-dev xorg-dev libxkbcommon-dev
+        run: sudo apt-get update && sudo apt-get install -y gcc libgl1-mesa-dev xorg-dev libxkbcommon-dev libwayland-dev wayland-protocols
 
       - name: Vet
         run: go vet -tags "$BUILD_TAGS" ./... 2>&1 | tee vet.log || { report vet.log; exit 1; }
@@ -114,7 +114,7 @@ jobs:
 
       - name: Install Linux GUI dependencies
         if: runner.os == 'Linux'
-        run: sudo apt-get update && sudo apt-get install -y gcc libgl1-mesa-dev xorg-dev libxkbcommon-dev
+        run: sudo apt-get update && sudo apt-get install -y gcc libgl1-mesa-dev xorg-dev libxkbcommon-dev libwayland-dev wayland-protocols
 
       - name: Build (Linux)
         if: runner.os == 'Linux'
@@ -175,8 +175,65 @@ jobs:
           name: MKConnect-GUI-${{ matrix.name }}
           path: MKConnect-GUI-*
 
+  # Targets without a native runner or C toolchain are cross-compiled in
+  # fyne-cross's Docker images (Linux 386/armv7, Windows 386/arm64, Android).
+  gui-cross:
+    needs: test
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { os: linux, arch: "386" }
+          - { os: linux, arch: arm }
+          - { os: windows, arch: "386" }
+          - { os: windows, arch: arm64 }
+          - { os: android, arch: arm64 }
+          - { os: android, arch: arm }
+          - { os: android, arch: amd64 }
+          - { os: android, arch: "386" }
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+
+      - name: Install fyne-cross
+        run: go install github.com/fyne-io/fyne-cross@latest
+
+      - name: Build
+        run: |
+          v="${GITHUB_REF_NAME}"
+          if [ "${GITHUB_REF_TYPE}" != "tag" ]; then v="dev-${GITHUB_SHA::7}"; fi
+          # The images ship an older Go; GOTOOLCHAIN=auto fetches the one go.mod asks for.
+          fyne-cross ${{ matrix.os }} -arch=${{ matrix.arch }} \
+            -tags "$BUILD_TAGS" \
+            -ldflags "-X github.com/khaliilii/MKConnect/internal/version.Version=$v" \
+            -env GOTOOLCHAIN=auto \
+            -app-id com.khaliilii.mkconnect -name MKConnect \
+            -icon cmd/mkconnect-gui/Icon.png \
+            ./cmd/mkconnect-gui
+          ls -lR fyne-cross/dist
+
+      - name: Rename
+        run: |
+          for f in fyne-cross/dist/*/*; do
+            case "$f" in
+              *.tar.xz) ext=tar.xz ;;
+              *) ext="${f##*.}" ;;
+            esac
+            cp "$f" "MKConnect-GUI-${{ matrix.os }}-${{ matrix.arch }}.$ext"
+          done
+          ls -lh MKConnect-GUI-*
+
+      - uses: actions/upload-artifact@v5
+        with:
+          name: MKConnect-GUI-${{ matrix.os }}-${{ matrix.arch }}
+          path: MKConnect-GUI-*
+
   release:
-    needs: [build, gui]
+    needs: [build, gui, gui-cross]
     runs-on: ubuntu-latest
     if: startsWith(github.ref, 'refs/tags/v')
     steps:

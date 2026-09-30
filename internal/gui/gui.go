@@ -5,6 +5,9 @@ import (
 	"context"
 	"fmt"
 	"log"
+	"os"
+	"path/filepath"
+	"runtime"
 	"time"
 
 	"fyne.io/fyne/v2"
@@ -76,9 +79,12 @@ func Run(icon []byte) {
 	u.win = a.NewWindow("MKConnect")
 	u.win.Resize(fyne.NewSize(1000, 680))
 
-	path, err := profile.DefaultPath()
+	path, err := profilesPath(a)
 	if err == nil {
 		u.store, err = profile.Load(path)
+	}
+	if err == nil && isMobile {
+		u.store.Settings.Mode = profile.ModeProxy // TUN needs the Android VPN service
 	}
 	if err != nil {
 		// Don't start with an empty store: saving it would overwrite the user's profiles.
@@ -102,6 +108,18 @@ func Run(icon []byte) {
 		u.win.SetCloseIntercept(u.quit)
 	}
 	u.win.ShowAndRun()
+}
+
+// isMobile is true on Android/iOS, where there is no TUN (without a VPN service) and no tray.
+const isMobile = runtime.GOOS == "android" || runtime.GOOS == "ios"
+
+// profilesPath is $MKCONNECT_CONFIG, the user config dir on desktop, or the
+// app's private storage on mobile (which has no home directory).
+func profilesPath(a fyne.App) (string, error) {
+	if p := os.Getenv("MKCONNECT_CONFIG"); p != "" || !isMobile {
+		return profile.DefaultPath()
+	}
+	return filepath.Join(a.Storage().RootURI().Path(), "profiles.json"), nil
 }
 
 // build lays out the main window.

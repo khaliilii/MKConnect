@@ -100,6 +100,16 @@ func singBoxBase(s *profile.Settings, proxyOut obj, tun *tunOptions) obj {
 		}, rules...)
 	}
 
+	route := obj{
+		"rules":                   rules,
+		"final":                   tagProxy,
+		"default_domain_resolver": tagLocal,
+	}
+	if tun != nil {
+		// Keep the cores' own connections on the physical interface. Only needed
+		// with TUN, and interface monitoring isn't permitted for Android apps.
+		route["auto_detect_interface"] = true
+	}
 	return obj{
 		"log":      obj{"level": logLevel(s), "timestamp": true},
 		"dns":      dns,
@@ -108,12 +118,7 @@ func singBoxBase(s *profile.Settings, proxyOut obj, tun *tunOptions) obj {
 			proxyOut,
 			{"type": "direct", "tag": tagDirect},
 		},
-		"route": obj{
-			"rules":                   rules,
-			"final":                   tagProxy,
-			"auto_detect_interface":   true,
-			"default_domain_resolver": tagLocal,
-		},
+		"route": route,
 	}
 }
 

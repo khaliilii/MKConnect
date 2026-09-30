@@ -87,7 +87,18 @@ go build -trimpath -tags with_gvisor,with_quic,with_utls -ldflags "-s -w" ./cmd/
 
 Add `-tags no_xray` or `-tags no_singbox` to leave a core out and get a smaller binary. TUN mode needs the sing-box core.
 
-Releases for Linux, Windows, macOS and Android (CLI) on amd64 / arm64 / 386 / armv7 are built by GitHub Actions when a `v*.*.*` tag is pushed.
+GitHub Actions builds these on every push and attaches them to a release for `v*.*.*` tags:
+
+| | amd64 | 386 (x86) | arm64 | armv7 |
+|---|---|---|---|---|
+| Desktop app, Linux | ✅ | ✅ | ✅ | ✅ |
+| Desktop app, Windows | ✅ | ✅ | ✅ | – |
+| Desktop app, macOS | ✅ universal | – | ✅ universal | – |
+| Android app (APK) | ✅ | ✅ | ✅ | ✅ |
+| CLI, Linux / Windows / macOS / Android | ✅ | ✅ | ✅ | ✅ (Linux) |
+
+On Android the app currently runs the proxy mode (local SOCKS/HTTP proxy, shareable over a hotspot);
+a system-wide VPN (TUN) on Android needs a VPN service and is on the roadmap.
 
 ## Roadmap
 

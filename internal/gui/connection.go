@@ -6,6 +6,7 @@ import (
 	"net"
 	"strconv"
 	"strings"
+	"time"
 
 	"fyne.io/fyne/v2"
 	"fyne.io/fyne/v2/container"
@@ -67,6 +68,8 @@ func (u *ui) newConnectionPanel() fyne.CanvasObject {
 	lanInfo.Wrapping = fyne.TextWrapWord
 	lanInfo.Importance = widget.LowImportance
 	remoteDNS := entry(s.RemoteDNS, "1.1.1.1")
+	clipboard := widget.NewCheck("Auto-add links copied to the clipboard", nil)
+	clipboard.SetChecked(s.ClipboardImport)
 
 	updateVisibility := func() {
 		form.setVisible(extBox, s.Core == profile.CoreExternal)
@@ -86,6 +89,7 @@ func (u *ui) newConnectionPanel() fyne.CanvasObject {
 		s.AllowLAN = lan.Checked
 		s.ProxyUser, s.ProxyPass = strings.TrimSpace(proxyUser.Text), proxyPass.Text
 		s.RemoteDNS = strings.TrimSpace(remoteDNS.Text)
+		s.ClipboardImport = clipboard.Checked
 		updateVisibility()
 		u.save()
 	}
@@ -93,6 +97,7 @@ func (u *ui) newConnectionPanel() fyne.CanvasObject {
 	extKind.OnChanged = func(string) { changed() }
 	mode.OnChanged = func(string) { changed() }
 	lan.OnChanged = func(bool) { changed() }
+	clipboard.OnChanged = func(bool) { changed() }
 	for _, e := range []*widget.Entry{extPath, port, proxyUser, proxyPass, remoteDNS} {
 		e.OnChanged = func(string) { changed() }
 	}
@@ -108,6 +113,7 @@ func (u *ui) newConnectionPanel() fyne.CanvasObject {
 		{Text: "Proxy user", Widget: proxyUser},
 		{Text: "Proxy password", Widget: proxyPass},
 		{Text: "Tunnel DNS", Widget: remoteDNS},
+		{Text: "", Widget: clipboard},
 	})
 	updateVisibility()
 	u.settingsBox = settings
@@ -154,11 +160,16 @@ func (u *ui) connect() {
 					}
 				})
 			},
-			OnStarted: func() { fyne.Do(func() { u.setState(stateConnected, pc.Name) }) },
+			OnStarted: func(session *engine.Session) {
+				fyne.Do(func() {
+					u.session = session
+					u.setState(stateConnected, pc.Name)
+				})
+			},
 		})
 		fyne.Do(func() {
 			if u.done == done {
-				u.cancel, u.done = nil, nil
+				u.cancel, u.done, u.session = nil, nil, nil
 				u.setState(stateIdle, "")
 			}
 			if err != nil && ctx.Err() == nil {
@@ -261,4 +272,69 @@ func valueFor(values, labels []string, l string) string {
 		}
 	}
 	return values[0]
+}
+
+// newSessionBox shows the inbound/outbound of the running connection and live traffic.
+// relayout is called when the box appears or disappears so the parent can resize.
+func (u *ui) newSessionBox(relayout func()) fyne.CanvasObject {
+	caption := func() *widget.Label {
+		l := widget.NewLabel("")
+		l.SizeName = theme.SizeNameCaptionText
+		l.Truncation = fyne.TextTruncateEllipsis
+		return l
+	}
+	inbound, outbound, core := caption(), caption(), caption()
+	upload := widget.NewLabelWithStyle("", fyne.TextAlignLeading, fyne.TextStyle{Monospace: true})
+	download := widget.NewLabelWithStyle("", fyne.TextAlignLeading, fyne.TextStyle{Monospace: true})
+
+	form := &rowForm{labels: map[fyne.CanvasObject]*widget.Label{}}
+	box := form.build([]*widget.FormItem{
+		{Text: "Inbound", Widget: inbound},
+		{Text: "Outbound", Widget: outbound},
+		{Text: "Core", Widget: core},
+		{Text: "Upload", Widget: upload},
+		{Text: "Download", Widget: download},
+	})
+	box.Hide()
+
+	var (
+		shown          *engine.Session
+		lastUp, lastDn int64
+		lastAt         time.Time
+	)
+	refresh := func() {
+		s := u.session
+		if s == nil {
+			if shown != nil {
+				box.Hide()
+				shown = nil
+				relayout()
+			}
+			return
+		}
+		if s != shown {
+			shown, lastUp, lastDn, lastAt = s, 0, 0, time.Now()
+			inbound.SetText(strings.Join(s.Inbounds, "  |  "))
+			outbound.SetText(s.Outbound)
+			core.SetText(s.Core)
+			box.Show()
+			relayout()
+		}
+		up, down, ok := s.Traffic()
+		if !ok {
+			upload.SetText("n/a (external core)")
+			download.SetText("n/a (external core)")
+			return
+		}
+		secs := time.Since(lastAt).Seconds()
+		upload.SetText(fmt.Sprintf("%10s/s   total %s", profile.FormatBytes(int64(float64(up-lastUp)/secs)), profile.FormatBytes(up)))
+		download.SetText(fmt.Sprintf("%10s/s   total %s", profile.FormatBytes(int64(float64(down-lastDn)/secs)), profile.FormatBytes(down)))
+		lastUp, lastDn, lastAt = up, down, time.Now()
+	}
+	go func() {
+		for range time.Tick(time.Second) {
+			fyne.Do(refresh)
+		}
+	}()
+	return box
 }

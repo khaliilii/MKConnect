@@ -9,10 +9,8 @@ import (
 	"golang.org/x/term"
 
 	"github.com/khaliilii/MKConnect/internal/profile"
+	"github.com/khaliilii/MKConnect/internal/version"
 )
-
-// Version is set at build time with -ldflags "-X github.com/khaliilii/MKConnect/internal/cli.Version=..."
-var Version = "dev"
 
 var storePath string
 
@@ -21,7 +19,7 @@ func NewRoot() *cobra.Command {
 	root := &cobra.Command{
 		Use:           "mkconnect",
 		Short:         "SSH / VMess / VLESS / Trojan / Shadowsocks client with proxy, LAN sharing and TUN modes",
-		Version:       Version,
+		Version:       version.Version,
 		SilenceUsage:  true,
 		SilenceErrors: true,
 	}
@@ -31,7 +29,7 @@ func NewRoot() *cobra.Command {
 	root.RunE = run.RunE
 	root.Flags().AddFlagSet(run.Flags())
 
-	root.AddCommand(run, newProfileCmd(), newSettingsCmd(), newCoresCmd())
+	root.AddCommand(run, newProfileCmd(), newSubCmd(), newSettingsCmd(), newCoresCmd())
 	return root
 }
 

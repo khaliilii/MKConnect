@@ -4,8 +4,11 @@ package engine
 
 import (
 	"context"
+	"net"
+	"sync/atomic"
 
 	box "github.com/sagernet/sing-box"
+	"github.com/sagernet/sing-box/adapter"
 	"github.com/sagernet/sing-box/adapter/certificate"
 	"github.com/sagernet/sing-box/adapter/endpoint"
 	"github.com/sagernet/sing-box/adapter/inbound"
@@ -24,10 +27,13 @@ import (
 	"github.com/sagernet/sing-box/protocol/socks"
 	"github.com/sagernet/sing-box/protocol/ssh"
 	"github.com/sagernet/sing-box/protocol/trojan"
-	"github.com/sagernet/sing-box/protocol/tun"
+	sbtun "github.com/sagernet/sing-box/protocol/tun"
 	"github.com/sagernet/sing-box/protocol/vless"
 	"github.com/sagernet/sing-box/protocol/vmess"
+	"github.com/sagernet/sing-tun"
+	"github.com/sagernet/sing/common/bufio"
 	"github.com/sagernet/sing/common/json"
+	N "github.com/sagernet/sing/common/network"
 	"github.com/sagernet/sing/service"
 )
 
@@ -44,8 +50,9 @@ func newSingBoxContext() context.Context {
 }
 
 type singBoxEngine struct {
-	box    *box.Box
-	cancel context.CancelFunc
+	box     *box.Box
+	cancel  context.CancelFunc
+	traffic *proxyTraffic
 }
 
 func newSingBox(config []byte) (Engine, error) {
@@ -60,12 +67,42 @@ func newSingBox(config []byte) (Engine, error) {
 		cancel()
 		return nil, err
 	}
+	traffic := &proxyTraffic{}
+	instance.Router().AppendTracker(traffic)
 	if err := instance.Start(); err != nil {
 		instance.Close()
 		cancel()
 		return nil, err
 	}
-	return &singBoxEngine{box: instance, cancel: cancel}, nil
+	return &singBoxEngine{box: instance, cancel: cancel, traffic: traffic}, nil
+}
+
+func (e *singBoxEngine) Traffic() (up, down int64) {
+	return e.traffic.up.Load(), e.traffic.down.Load()
+}
+
+// proxyTraffic counts bytes of connections routed to the proxy outbound.
+type proxyTraffic struct {
+	up, down atomic.Int64
+}
+
+func (t *proxyTraffic) RoutedConnection(_ context.Context, conn net.Conn, _ adapter.InboundContext, _ adapter.Rule, out adapter.Outbound) net.Conn {
+	if out == nil || out.Tag() != tagProxy {
+		return conn
+	}
+	// conn is the client side: reading from it is upload, writing to it is download.
+	return bufio.NewInt64CounterConn(conn, []*atomic.Int64{&t.up}, []*atomic.Int64{&t.down})
+}
+
+func (t *proxyTraffic) RoutedPacketConnection(_ context.Context, conn N.PacketConn, _ adapter.InboundContext, _ adapter.Rule, out adapter.Outbound) N.PacketConn {
+	if out == nil || out.Tag() != tagProxy {
+		return conn
+	}
+	return bufio.NewInt64CounterPacketConn(conn, []*atomic.Int64{&t.up}, nil, []*atomic.Int64{&t.down}, nil)
+}
+
+func (t *proxyTraffic) RoutedFlow(context.Context, adapter.InboundContext, adapter.Rule, adapter.Outbound) tun.FlowTracker {
+	return nil
 }
 
 func (e *singBoxEngine) Close() error {
@@ -78,7 +115,7 @@ func (e *singBoxEngine) Close() error {
 // (naive/cronet, tailscale, openvpn, ...) and their native libraries.
 func singBoxContext(ctx context.Context) context.Context {
 	inbounds := inbound.NewRegistry()
-	tun.RegisterInbound(inbounds)
+	sbtun.RegisterInbound(inbounds)
 	mixed.RegisterInbound(inbounds)
 
 	outbounds := outbound.NewRegistry()

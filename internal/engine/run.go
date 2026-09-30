@@ -15,7 +15,7 @@ type Hooks struct {
 	// OnHostKey is called with a newly pinned SSH host key so it can be saved.
 	OnHostKey func(key string)
 	// OnStarted is called once every core is up.
-	OnStarted func()
+	OnStarted func(*Session)
 }
 
 // Run starts the profile with the given settings and blocks until ctx is
@@ -43,6 +43,7 @@ func Run(ctx context.Context, p profile.Profile, s profile.Settings, hooks Hooks
 		}
 	}
 
+	shown := p // start may pin the server to an IP; show what the user configured
 	engines, err := start(ctx, &p, &s)
 	defer func() {
 		for i := len(engines) - 1; i >= 0; i-- {
@@ -55,10 +56,14 @@ func Run(ctx context.Context, p profile.Profile, s profile.Settings, hooks Hooks
 		return err
 	}
 
-	log.Printf("🚀 %s (%s) running: core=%s mode=%s proxy=%s", p.Name, p.Type, s.Core, s.Mode,
-		net.JoinHostPort(s.ListenAddress(), fmt.Sprint(s.ListenPort)))
+	session := newSession(&shown, &s, engines[0])
+	log.Printf("🚀 %s running on %s", p.Name, session.Core)
+	for _, in := range session.Inbounds {
+		log.Printf("   ⬇ inbound:  %s", in)
+	}
+	log.Printf("   ⬆ outbound: %s", session.Outbound)
 	if hooks.OnStarted != nil {
-		hooks.OnStarted()
+		hooks.OnStarted(session)
 	}
 
 	stopped := make(chan error, len(engines))

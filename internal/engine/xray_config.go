@@ -39,6 +39,9 @@ func xrayConfig(p *profile.Profile, s *profile.Settings) (obj, error) {
 		"routing": obj{
 			"rules": []obj{{"type": "field", "ip": privateCIDRs, "outboundTag": tagDirect}},
 		},
+		// In-process traffic counters for the proxy outbound (read by xrayEngine.Traffic).
+		"stats":  obj{},
+		"policy": obj{"system": obj{"statsOutboundUplink": true, "statsOutboundDownlink": true}},
 	}, nil
 }
 

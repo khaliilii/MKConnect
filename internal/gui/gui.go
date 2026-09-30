@@ -4,6 +4,7 @@ package gui
 import (
 	"context"
 	"fmt"
+	"log"
 	"time"
 
 	"fyne.io/fyne/v2"
@@ -13,6 +14,7 @@ import (
 	"fyne.io/fyne/v2/driver/desktop"
 	"fyne.io/fyne/v2/widget"
 
+	"github.com/khaliilii/MKConnect/internal/engine"
 	"github.com/khaliilii/MKConnect/internal/profile"
 )
 
@@ -32,18 +34,33 @@ type ui struct {
 	store *profile.Store
 	logs  *logBuffer
 
-	list      *widget.List
+	profilesPanel *fyne.Container
+	list          *widget.List
+	visible   []int // indices into store.Profiles shown in the list
 	emptyHint *widget.Label
+
+	groupFilter    string            // filterAll, filterUngrouped or a group id
+	groupLabels    map[string]string // group picker label -> filter value
+	groupSelect    *widget.Select
+	groupUpdateBtn *widget.Button
+	groupDeleteBtn *widget.Button
+	usageCard      *fyne.Container
+	usageTitle     *widget.Label
+	usageBar       *widget.ProgressBar
+	usageText      *widget.Label
+
+	lastClipboard string
+	session       *engine.Session // nil while disconnected
 
 	state  connState
 	cancel context.CancelFunc
 	done   chan struct{}
 
-	connectBtn   *widget.Button
-	statusLabel  *widget.Label
-	settingsBox  *fyne.Container
-	trayMenu     *fyne.Menu
-	trayConnect  *fyne.MenuItem
+	connectBtn  *widget.Button
+	statusLabel *widget.Label
+	settingsBox *fyne.Container
+	trayMenu    *fyne.Menu
+	trayConnect *fyne.MenuItem
 }
 
 // Run starts the GUI and blocks until the app quits.
@@ -74,6 +91,9 @@ func Run(icon []byte) {
 	}
 
 	u.build()
+	u.autoUpdateSubscriptions()
+	// Like Hiddify: pick up share links copied while the app was in the background.
+	a.Lifecycle().SetOnEnteredForeground(u.checkClipboard)
 	if desk, ok := a.(desktop.App); ok {
 		u.setupTray(desk, res)
 		// With a tray icon, closing the window keeps the connection running in the background.
@@ -87,7 +107,10 @@ func Run(icon []byte) {
 // build lays out the main window.
 func (u *ui) build() {
 	left := u.newProfilesPanel()
-	right := container.NewVSplit(u.newConnectionPanel(), u.newLogView())
+	var logPane *fyne.Container
+	session := u.newSessionBox(func() { logPane.Refresh() })
+	logPane = container.NewBorder(container.NewVBox(session, widget.NewSeparator()), nil, nil, nil, u.newLogView())
+	right := container.NewVSplit(u.newConnectionPanel(), logPane)
 	right.Offset = 0.62
 	split := container.NewHSplit(left, right)
 	split.Offset = 0.4
@@ -101,6 +124,9 @@ func (u *ui) mainMenu() *fyne.MainMenu {
 			fyne.NewMenuItem("Import links / subscription…", u.showImport),
 			fyne.NewMenuItemSeparator(),
 			fyne.NewMenuItem("Quit MKConnect", u.quit),
+		),
+		fyne.NewMenu("Help",
+			fyne.NewMenuItem("About MKConnect", u.showAbout),
 		),
 	)
 }
@@ -132,6 +158,11 @@ func (u *ui) quit() {
 		}
 		fyne.Do(u.app.Quit)
 	}()
+}
+
+// logf writes to the log view (stdout/stderr are captured into it).
+func (u *ui) logf(format string, args ...any) {
+	log.Printf(format, args...)
 }
 
 // save writes the store and reports failures.

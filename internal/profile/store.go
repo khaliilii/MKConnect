@@ -41,17 +41,21 @@ type Settings struct {
 	// RemoteDNS is the resolver used through the tunnel in TUN mode.
 	RemoteDNS string `json:"remote_dns,omitempty"`
 	LogLevel  string `json:"log_level,omitempty"`
+
+	// ClipboardImport makes the desktop app add share links found on the clipboard.
+	ClipboardImport bool `json:"clipboard_import"`
 }
 
 // DefaultSettings returns the settings used for a fresh install.
 func DefaultSettings() Settings {
 	return Settings{
-		Core:         CoreSingBox,
-		Mode:         ModeProxy,
-		ExternalKind: CoreSingBox,
-		ListenPort:   1080,
-		RemoteDNS:    "1.1.1.1",
-		LogLevel:     "info",
+		Core:            CoreSingBox,
+		Mode:            ModeProxy,
+		ExternalKind:    CoreSingBox,
+		ListenPort:      1080,
+		RemoteDNS:       "1.1.1.1",
+		LogLevel:        "info",
+		ClipboardImport: true,
 	}
 }
 
@@ -90,6 +94,7 @@ func (s *Settings) Validate() error {
 type Store struct {
 	Settings Settings  `json:"settings"`
 	Active   string    `json:"active,omitempty"`
+	Groups   []Group   `json:"groups,omitempty"`
 	Profiles []Profile `json:"profiles"`
 
 	path string

@@ -40,7 +40,7 @@ func newProfileListCmd() *cobra.Command {
 				return nil
 			}
 			w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
-			fmt.Fprintln(w, "\tID\tNAME\tTYPE\tSERVER\tTRANSPORT")
+			fmt.Fprintln(w, "\tID\tNAME\tGROUP\tTYPE\tSERVER\tTRANSPORT")
 			for _, p := range store.Profiles {
 				mark := ""
 				if p.ID == store.Active {
@@ -50,7 +50,11 @@ func newProfileListCmd() *cobra.Command {
 				if p.TLS.Mode != "" {
 					transport += "+" + p.TLS.Mode
 				}
-				fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\t%s\n", mark, p.ID, p.Name, p.Type, p.Address(), transport)
+				group := "-"
+				if g, err := store.FindGroup(p.Group); p.Group != "" && err == nil {
+					group = g.Name
+				}
+				fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\t%s\t%s\n", mark, p.ID, p.Name, group, p.Type, p.Address(), transport)
 			}
 			return w.Flush()
 		},
@@ -319,7 +323,7 @@ func newProfileUseCmd() *cobra.Command {
 }
 
 func newProfileImportCmd() *cobra.Command {
-	var file, subURL, legacy string
+	var file, subURL, legacy, group string
 	cmd := &cobra.Command{
 		Use:   "import [link...]",
 		Short: "Import share links, a subscription, or a v1 config.json",
@@ -345,11 +349,21 @@ func newProfileImportCmd() *cobra.Command {
 				text.WriteString("\n")
 			}
 			if subURL != "" {
-				data, err := profile.FetchSubscription(subURL)
-				if err != nil {
+				g := store.AddGroup(group, subURL)
+				if err := updateGroup(store, g); err != nil {
 					return err
 				}
-				text.WriteString(string(data) + "\n")
+				if text.Len() == 0 && legacy == "" {
+					return store.Save()
+				}
+			}
+			groupID := ""
+			if group != "" && subURL == "" {
+				g, err := store.FindGroup(group)
+				if err != nil {
+					g = store.AddGroup(group, "")
+				}
+				groupID = g.ID
 			}
 
 			var added int
@@ -372,13 +386,14 @@ func newProfileImportCmd() *cobra.Command {
 				fmt.Fprintf(os.Stderr, "⚠️  skipped: %v\n", e)
 			}
 			for _, p := range profiles {
+				p.Group = groupID
 				if _, err := store.Add(p); err != nil {
 					fmt.Fprintf(os.Stderr, "⚠️  skipped %s: %v\n", p.Name, err)
 					continue
 				}
 				added++
 			}
-			if added == 0 {
+			if added == 0 && subURL == "" {
 				return fmt.Errorf("nothing imported")
 			}
 			if err := store.Save(); err != nil {
@@ -389,7 +404,8 @@ func newProfileImportCmd() *cobra.Command {
 		},
 	}
 	cmd.Flags().StringVar(&file, "file", "", "file with one link per line (or base64 subscription)")
-	cmd.Flags().StringVar(&subURL, "url", "", "subscription URL")
+	cmd.Flags().StringVar(&subURL, "url", "", "subscription URL (creates a group that can be refreshed with `sub update`)")
+	cmd.Flags().StringVar(&group, "group", "", "put the imported accounts in this group (created if missing)")
 	cmd.Flags().StringVar(&legacy, "legacy", "", "MKConnect v1 config.json to migrate")
 	return cmd
 }

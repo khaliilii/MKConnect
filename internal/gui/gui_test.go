@@ -1,8 +1,11 @@
 package gui
 
 import (
+	"encoding/base64"
 	"image/png"
 	"net"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -12,6 +15,7 @@ import (
 
 	"fyne.io/fyne/v2"
 	"fyne.io/fyne/v2/test"
+	"fyne.io/fyne/v2/theme"
 
 	"github.com/khaliilii/MKConnect/internal/profile"
 )
@@ -20,6 +24,7 @@ import (
 func newTestUI(t *testing.T) *ui {
 	t.Helper()
 	a := test.NewTempApp(t)
+	a.SetIcon(theme.FyneLogo())
 	store, err := profile.Load(filepath.Join(t.TempDir(), "profiles.json"))
 	if err != nil {
 		t.Fatal(err)
@@ -83,7 +88,7 @@ func TestMainWindow(t *testing.T) {
 	}
 	screenshot(t, u.win, "main")
 
-	u.importText("ss://" + "YWVzLTI1Ni1nY206cHc" + "@5.6.7.8:8388#Imported\nnot-a-link")
+	u.importText("ss://"+"YWVzLTI1Ni1nY206cHc"+"@5.6.7.8:8388#Imported\nnot-a-link", "")
 	if got := u.list.Length(); got != 4 {
 		t.Fatalf("after import list shows %d profiles, want 4", got)
 	}
@@ -142,6 +147,7 @@ func TestConnectDisconnect(t *testing.T) {
 	u.list.Select(2) // trojan: sing-box starts without reaching the server
 	u.connect()
 	waitFor(t, func() bool { return u.state == stateConnected })
+	time.Sleep(1500 * time.Millisecond) // let the session box tick once
 	screenshot(t, u.win, "connected")
 
 	c, err := net.Dial("tcp", net.JoinHostPort("127.0.0.1", strconv.Itoa(u.store.Settings.ListenPort)))
@@ -150,8 +156,12 @@ func TestConnectDisconnect(t *testing.T) {
 	}
 	c.Close()
 
+	if u.session == nil || !strings.Contains(u.session.Outbound, "nl.example.com:443") {
+		t.Fatalf("session not published: %+v", u.session)
+	}
+
 	u.disconnect(nil)
-	waitFor(t, func() bool { return u.state == stateIdle })
+	waitFor(t, func() bool { return u.state == stateIdle && u.session == nil })
 }
 
 func waitFor(t *testing.T, cond func() bool) {
@@ -166,4 +176,71 @@ func waitFor(t *testing.T, cond func() bool) {
 		time.Sleep(50 * time.Millisecond)
 	}
 	t.Fatal("timed out waiting for state change")
+}
+
+func TestGroupsAndSubscription(t *testing.T) {
+	if raceEnabled {
+		t.Skip("background fyne.Do callbacks aren't serialized by the Fyne test driver")
+	}
+	links := "trojan://a@h.com:443#sub-one\ntrojan://b@h.com:443#sub-two\n"
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Subscription-Userinfo", "upload=1073741824; download=2147483648; total=10737418240; expire=4102444800")
+		w.Header().Set("Profile-Title", "My Provider")
+		w.Write([]byte(base64.StdEncoding.EncodeToString([]byte(links))))
+	}))
+	defer srv.Close()
+
+	u := newTestUI(t)
+	// Bulk import into a new local group.
+	u.importText("trojan://x@g.com:443#g1\ntrojan://y@g.com:443#g2", "Work")
+	if u.groupFilter == filterAll || u.list.Length() != 2 {
+		t.Fatalf("group view shows %d accounts, filter %q", u.list.Length(), u.groupFilter)
+	}
+
+	// Subscription: fetched in the background, then applied on the UI goroutine.
+	g := u.store.AddGroup("", srv.URL)
+	u.groupFilter = g.ID
+	u.refreshProfiles()
+	u.updateSubscription(g.ID, false)
+	waitFor(t, func() bool { return u.list.Length() == 2 })
+	g, _ = u.store.FindGroup(g.ID)
+	if g.Name != "My Provider" || g.Usage == nil || g.Usage.Used() != 3<<30 {
+		t.Fatalf("subscription metadata not applied: %+v", g)
+	}
+	if !u.usageCard.Visible() || !strings.Contains(u.usageText.Text, "3.0 GB of 10.0 GB used") {
+		t.Fatalf("usage card: visible=%v text=%q", u.usageCard.Visible(), u.usageText.Text)
+	}
+	screenshot(t, u.win, "subscription")
+
+	u.groupSelect.SetSelected(labelAllGroups)
+	if u.list.Length() != 7 {
+		t.Fatalf("all accounts shows %d, want 7", u.list.Length())
+	}
+}
+
+func TestClipboardImport(t *testing.T) {
+	u := newTestUI(t)
+	link := "vless://bf000d23-0752-40b4-affe-68f7707a9661@clip.example.com:443?security=tls#From%20clipboard"
+	u.app.Clipboard().SetContent(link)
+	u.checkClipboard()
+	if len(u.store.Profiles) != 4 {
+		t.Fatalf("clipboard link not imported: %d profiles", len(u.store.Profiles))
+	}
+	u.lastClipboard = "" // same content again must not create a duplicate
+	u.checkClipboard()
+	if len(u.store.Profiles) != 4 {
+		t.Fatal("duplicate imported from clipboard")
+	}
+	u.store.Settings.ClipboardImport = false
+	u.app.Clipboard().SetContent("trojan://z@off.com:443#off")
+	u.checkClipboard()
+	if len(u.store.Profiles) != 4 {
+		t.Fatal("imported although clipboard import is off")
+	}
+}
+
+func TestAbout(t *testing.T) {
+	u := newTestUI(t)
+	u.showAbout()
+	screenshot(t, u.win, "about")
 }

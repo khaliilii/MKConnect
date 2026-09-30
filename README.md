@@ -4,7 +4,9 @@ A multi-account client for **SSH, VMess, VLESS, Trojan and Shadowsocks**, with a
 
 ## Features
 
-- Any number of accounts, added by hand or imported from `vmess://`, `vless://`, `trojan://`, `ss://`, `ssh://` links or a subscription URL
+- Any number of accounts, added by hand or imported in bulk from `vmess://`, `vless://`, `trojan://`, `ss://`, `ssh://` links
+- Groups, and subscriptions (like Hiddify): a URL whose accounts are refreshed automatically, with the data
+  used / remaining and expiry date reported by the provider (`subscription-userinfo`)
 - Choice of core:
   - **sing-box** (built in): all protocols including SSH, native TUN
   - **xray** (built in): VMess / VLESS / Trojan / Shadowsocks, incl. `xhttp`
@@ -20,10 +22,13 @@ A multi-account client for **SSH, VMess, VLESS, Trojan and Shadowsocks**, with a
 
 `MKConnect` (from the `MKConnect-GUI-*` release files) is the desktop app for Linux, Windows and macOS:
 
-- account list with **Add** (form per protocol), **Import** (links, clipboard or subscription URL), edit, copy share link and delete
+- account list with **Add** (form per protocol), **Import** (links in bulk, optionally into a group, or a subscription URL), edit, copy share link and delete
+- group picker; subscriptions show a usage card (used / total, upload / download, expiry) and refresh automatically
+- share links copied to the clipboard are added automatically when you switch to the app (can be turned off)
 - core, mode (Proxy / TUN), local port, LAN sharing and proxy password, all saved as you change them
 - one-click connect / disconnect; selecting another account while connected switches to it
-- live logs from the cores, and a tray icon that keeps the connection running when the window is closed
+- live connection info: inbound, outbound, core, upload / download speed and totals
+- live logs, a tray icon that keeps the connection running when the window is closed, and an About page
 
 For TUN mode start the app with administrator rights (`sudo` on Linux/macOS, "Run as administrator" on Windows).
 The macOS app is not notarized; after unzipping run `xattr -dr com.apple.quarantine MKConnect.app` once.
@@ -36,7 +41,10 @@ The desktop app and the CLI share the same profiles file. Set `MKCONNECT_CONFIG`
 # add accounts
 mkconnect profile add ssh --name home --server 1.2.3.4 --user root --ask-password
 mkconnect profile import 'vless://...' 'vmess://...'
-mkconnect profile import --url https://example.com/subscription
+mkconnect profile import --group work 'vless://...' 'trojan://...'
+mkconnect sub add https://example.com/subscription
+mkconnect sub ls                                    # usage and expiry per subscription
+mkconnect sub update --all
 mkconnect profile import --legacy config.json      # migrate a v1 config
 
 # manage them

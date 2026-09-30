@@ -26,6 +26,7 @@ var Types = []string{TypeSSH, TypeVMess, TypeVLESS, TypeTrojan, TypeShadowsocks}
 type Profile struct {
 	ID     string `json:"id"`
 	Name   string `json:"name"`
+	Group  string `json:"group,omitempty"` // Group.ID, empty for ungrouped
 	Type   string `json:"type"`
 	Server string `json:"server"`
 	Port   int    `json:"port"`

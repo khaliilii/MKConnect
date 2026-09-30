@@ -11,6 +11,7 @@ import (
 	"os"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/armon/go-socks5"
@@ -75,6 +76,7 @@ type sshEngine struct {
 	reconnectMu sync.Mutex // serializes reconnects so a drop triggers only one
 
 	listener net.Listener
+	up, down atomic.Int64
 	done     chan error
 	closed   chan struct{}
 	once     sync.Once
@@ -157,7 +159,7 @@ func sshClientConfig(p *profile.Profile) (*ssh.ClientConfig, error) {
 			}
 			return nil
 		},
-		Timeout:         sshDialTimeout,
+		Timeout: sshDialTimeout,
 	}, nil
 }
 
@@ -202,7 +204,17 @@ func (e *sshEngine) current() *ssh.Client {
 	return e.client
 }
 
+func (e *sshEngine) Traffic() (up, down int64) { return e.up.Load(), e.down.Load() }
+
 func (e *sshEngine) dial(network, addr string) (net.Conn, error) {
+	conn, err := e.dialSSH(network, addr)
+	if err != nil {
+		return nil, err
+	}
+	return &countingConn{Conn: conn, up: &e.up, down: &e.down}, nil
+}
+
+func (e *sshEngine) dialSSH(network, addr string) (net.Conn, error) {
 	c := e.current()
 	conn, err := c.Dial(network, addr)
 	if err == nil {
@@ -261,6 +273,24 @@ func (e *sshEngine) Close() error {
 		}
 	})
 	return nil
+}
+
+// countingConn counts bytes written to (up) and read from (down) the tunnel.
+type countingConn struct {
+	net.Conn
+	up, down *atomic.Int64
+}
+
+func (c *countingConn) Read(b []byte) (int, error) {
+	n, err := c.Conn.Read(b)
+	c.down.Add(int64(n))
+	return n, err
+}
+
+func (c *countingConn) Write(b []byte) (int, error) {
+	n, err := c.Conn.Write(b)
+	c.up.Add(int64(n))
+	return n, err
 }
 
 // remoteResolver skips local DNS so hostnames are resolved by the SSH server.

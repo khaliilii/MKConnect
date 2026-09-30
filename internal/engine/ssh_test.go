@@ -158,6 +158,10 @@ func TestBuiltinSSHProxiesTraffic(t *testing.T) {
 		t.Fatalf("unexpected body %q", body)
 	}
 
+	if up, down := e.(*sshEngine).Traffic(); up == 0 || down < int64(len("hello through tunnel")) {
+		t.Fatalf("traffic not counted: up=%d down=%d", up, down)
+	}
+
 	// Kill the SSH session; the next request must transparently reconnect.
 	e.(*sshEngine).current().Close()
 	if body := getThroughSOCKS(t, s.ListenPort, "lan", "secret", target.URL); body != "hello through tunnel" {
@@ -203,5 +207,9 @@ func TestSingBoxSSHProxiesTraffic(t *testing.T) {
 	url := strings.Replace(target.URL, "127.0.0.1", "localhost", 1)
 	if body := getThroughSOCKS(t, s.ListenPort, "", "", url); body != "hello through tunnel" {
 		t.Fatalf("unexpected body %q", body)
+	}
+	up, down := e.(trafficCounter).Traffic()
+	if up == 0 || down < int64(len("hello through tunnel")) {
+		t.Fatalf("traffic not counted: up=%d down=%d", up, down)
 	}
 }

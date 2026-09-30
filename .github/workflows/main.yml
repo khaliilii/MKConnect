@@ -16,6 +16,13 @@ env:
 jobs:
   test:
     runs-on: ubuntu-latest
+    defaults:
+      run:
+        # pipefail keeps the exit code of go through `| tee`; report() turns the
+        # log tail into an annotation so failures are readable without log access.
+        shell: bash -o pipefail -e {0}
+    env:
+      BASH_ENV: .github/report.sh
     steps:
       - uses: actions/checkout@v5
 
@@ -27,10 +34,10 @@ jobs:
         run: sudo apt-get update && sudo apt-get install -y gcc libgl1-mesa-dev xorg-dev libxkbcommon-dev
 
       - name: Vet
-        run: go vet -tags "$BUILD_TAGS" ./...
+        run: go vet -tags "$BUILD_TAGS" ./... 2>&1 | tee vet.log || { report vet.log; exit 1; }
 
       - name: Test
-        run: go test -race -tags "$BUILD_TAGS" ./...
+        run: go test -race -tags "$BUILD_TAGS" ./... 2>&1 | tee test.log || { report test.log; exit 1; }
 
   build:
     needs: test
@@ -69,7 +76,7 @@ jobs:
           version="${GITHUB_REF_NAME}"
           if [ "${GITHUB_REF_TYPE}" != "tag" ]; then version="dev-${GITHUB_SHA::7}"; fi
           go build -trimpath -tags "$BUILD_TAGS" \
-            -ldflags "-s -w -X github.com/khaliilii/MKConnect/internal/cli.Version=${version}" \
+            -ldflags "-s -w -X github.com/khaliilii/MKConnect/internal/version.Version=${version}" \
             -o "dist/$name" .
           ls -lh dist/
 
@@ -99,6 +106,12 @@ jobs:
         with:
           go-version-file: go.mod
 
+      - name: Version
+        run: |
+          v="${GITHUB_REF_NAME}"
+          if [ "${GITHUB_REF_TYPE}" != "tag" ]; then v="dev-${GITHUB_SHA::7}"; fi
+          echo "LDVERSION=-X github.com/khaliilii/MKConnect/internal/version.Version=$v" >> "$GITHUB_ENV"
+
       - name: Install Linux GUI dependencies
         if: runner.os == 'Linux'
         run: sudo apt-get update && sudo apt-get install -y gcc libgl1-mesa-dev xorg-dev libxkbcommon-dev
@@ -106,23 +119,23 @@ jobs:
       - name: Build (Linux)
         if: runner.os == 'Linux'
         run: |
-          go build -trimpath -tags "$BUILD_TAGS" -ldflags "-s -w" -o dist/MKConnect ./cmd/mkconnect-gui
+          go build -trimpath -tags "$BUILD_TAGS" -ldflags "-s -w $LDVERSION" -o dist/MKConnect ./cmd/mkconnect-gui
           cp cmd/mkconnect-gui/Icon.png dist/
           tar -C dist -czf "MKConnect-GUI-${{ matrix.name }}.tar.gz" MKConnect Icon.png
 
       - name: Build (Windows)
         if: runner.os == 'Windows'
         run: |
-          go build -trimpath -tags "$BUILD_TAGS" -ldflags "-s -w -H=windowsgui" -o dist/MKConnect.exe ./cmd/mkconnect-gui
+          go build -trimpath -tags "$BUILD_TAGS" -ldflags "-s -w -H=windowsgui $LDVERSION" -o dist/MKConnect.exe ./cmd/mkconnect-gui
           cd dist && 7z a "../MKConnect-GUI-${{ matrix.name }}.zip" MKConnect.exe
 
       - name: Build (macOS universal .app)
         if: runner.os == 'macOS'
         run: |
           export CGO_ENABLED=1
-          GOARCH=arm64 go build -trimpath -tags "$BUILD_TAGS" -ldflags "-s -w" -o dist/mk-arm64 ./cmd/mkconnect-gui
+          GOARCH=arm64 go build -trimpath -tags "$BUILD_TAGS" -ldflags "-s -w $LDVERSION" -o dist/mk-arm64 ./cmd/mkconnect-gui
           GOARCH=amd64 CGO_CFLAGS="-arch x86_64" CGO_LDFLAGS="-arch x86_64" \
-            go build -trimpath -tags "$BUILD_TAGS" -ldflags "-s -w" -o dist/mk-amd64 ./cmd/mkconnect-gui
+            go build -trimpath -tags "$BUILD_TAGS" -ldflags "-s -w $LDVERSION" -o dist/mk-amd64 ./cmd/mkconnect-gui
 
           app=dist/MKConnect.app
           mkdir -p "$app/Contents/MacOS" "$app/Contents/Resources"

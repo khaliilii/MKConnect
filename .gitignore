@@ -7,3 +7,7 @@
 # v1 config and any local profile files hold credentials
 config.json
 profiles.json
+
+# local fyne-cross builds
+/vendor/
+/fyne-cross/

@@ -28,10 +28,16 @@ docker run --rm --privileged --platform "linux/$host_arch" \
 	-v "$build_cache":/gocache \
 	-v "$build_cache/apt":/var/cache/apt/archives \
 	-e GOMODCACHE=/gomod -e GOCACHE=/gocache -e GOPROXY=off -e GOFLAGS=-mod=mod -e GOTOOLCHAIN=local \
+	-e MIRROR="${DEBIAN_MIRROR:-http://ftp.nl.debian.org}" \
 	debian:bookworm-slim sh -eu -c '
 export PATH=/usr/local/go/bin:$PATH DEBIAN_FRONTEND=noninteractive
+# deb.debian.org is unreliable from some networks; use a fixed mirror (DEBIAN_MIRROR).
+sed -i "s#http://deb.debian.org#$MIRROR#g" /etc/apt/sources.list.d/debian.sources
 apt-get update -qq -o Acquire::Retries=8
-apt-get install -y -qq -o Acquire::Retries=8 --no-install-recommends iproute2 curl nftables procps >/dev/null
+for try in 1 2 3 4 5 6; do
+	apt-get install -y -qq -o Acquire::Retries=8 --no-install-recommends iproute2 curl nftables procps >/dev/null && break
+	[ $try = 6 ] && exit 1; sleep 5
+done
 
 echo "== build"
 CGO_ENABLED=0 go build -buildvcs=false -tags with_gvisor,with_quic,with_utls -o /tmp/mkconnect .

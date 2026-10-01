@@ -29,7 +29,9 @@ echo "$app_version" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+$' || app_version=0.0.0
 mkdir -p dist/android
 for arch in $arches; do
 	echo "building android/$arch..."
-	fyne-cross android -arch="$arch" \
+	# fyne-cross forwards the host GOFLAGS into the container, which would
+	# override the vendor/ directory; build from vendor with no network.
+	env -u GOFLAGS fyne-cross android -arch="$arch" \
 		-tags with_gvisor,with_quic,with_utls \
 		-env GOTOOLCHAIN="$go_version" -env GOPROXY=off \
 		-app-id com.khaliilii.mkconnect -name MKConnect \

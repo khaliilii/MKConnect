@@ -37,9 +37,11 @@ for arch in $arches; do
 		-v "$build_cache":/gocache \
 		-v "$apt_cache":/var/cache/apt/archives \
 		-e GOMODCACHE=/gomod -e GOCACHE=/gocache -e GOPROXY=off -e GOFLAGS=-mod=mod -e GOTOOLCHAIN=local \
-		-e VERSION="$version" -e ARCH="$arch" \
+		-e VERSION="$version" -e ARCH="$arch" -e MIRROR="${DEBIAN_MIRROR:-http://ftp.nl.debian.org}" \
 		debian:bookworm-slim sh -eu -c '
 export PATH=/usr/local/go/bin:$PATH DEBIAN_FRONTEND=noninteractive
+# deb.debian.org is unreliable from some networks; use a fixed mirror (DEBIAN_MIRROR).
+sed -i "s#http://deb.debian.org#$MIRROR#g" /etc/apt/sources.list.d/debian.sources
 native=$(dpkg --print-architecture)
 case $ARCH in
 amd64) triplet=x86_64-linux-gnu deb=amd64 cc=x86_64-linux-gnu-gcc ;;
@@ -55,7 +57,13 @@ for p in libgl1-mesa-dev libx11-dev libxcursor-dev libxrandr-dev libxinerama-dev
 	pkgs="$pkgs $p:$deb"
 done
 apt-get update -qq -o Acquire::Retries=8
-apt-get install -y -qq -o Acquire::Retries=8 --no-install-recommends $pkgs >/dev/null
+# The mirror sometimes drops connections mid-download; downloaded packages are
+# kept in the mounted apt cache, so each retry resumes where the last stopped.
+for try in 1 2 3 4 5 6; do
+	apt-get install -y -qq -o Acquire::Retries=8 --no-install-recommends $pkgs >/dev/null && break
+	[ $try = 6 ] && exit 1
+	echo "apt download failed, retrying ($try)..."; sleep 5
+done
 
 tags=with_gvisor,with_quic,with_utls
 ldflags="-s -w -X github.com/khaliilii/MKConnect/internal/version.Version=$VERSION"

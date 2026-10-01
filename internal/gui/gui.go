@@ -139,6 +139,7 @@ func (u *ui) build() {
 func (u *ui) mainMenu() *fyne.MainMenu {
 	return fyne.NewMainMenu(
 		fyne.NewMenu("File",
+			fyne.NewMenuItem("Import from clipboard", u.importClipboard),
 			fyne.NewMenuItem("Import links / subscription…", u.showImport),
 			fyne.NewMenuItemSeparator(),
 			fyne.NewMenuItem("Quit MKConnect", u.quit),

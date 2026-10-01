@@ -82,6 +82,8 @@ func xrayOutbound(p *profile.Profile) (obj, error) {
 		return out, nil
 	case profile.TypeSSH:
 		return nil, fmt.Errorf("xray has no SSH outbound")
+	case profile.TypeHysteria2, profile.TypeTUIC:
+		return nil, fmt.Errorf("%s needs the sing-box core (set Core to sing-box)", p.Type)
 	default:
 		return nil, fmt.Errorf("xray: unsupported profile type %q", p.Type)
 	}

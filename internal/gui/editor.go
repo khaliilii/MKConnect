@@ -118,6 +118,12 @@ func (u *ui) openEditor(p profile.Profile, isNew bool) {
 		})
 	}
 
+	if p.Type == profile.TypeHysteria2 || p.Type == profile.TypeTUIC {
+		quicItems, collectQUIC := quicForm(&p)
+		items = append(items, quicItems...)
+		collect = append(collect, collectQUIC)
+	}
+
 	form := &rowForm{labels: map[fyne.CanvasObject]*widget.Label{}}
 	var applyVisibility func()
 	if p.Type == profile.TypeVMess || p.Type == profile.TypeVLESS || p.Type == profile.TypeTrojan {
@@ -223,6 +229,69 @@ func transportForm(p *profile.Profile, setVisible func(fyne.CanvasObject, bool))
 		}
 	}
 	return items, collect, apply
+}
+
+var (
+	congestionControls = []string{"bbr", "cubic", "new_reno"}
+	udpRelayModes      = []string{"native", "quic"}
+)
+
+// quicForm builds the rows for Hysteria2 and TUIC (QUIC with TLS).
+func quicForm(p *profile.Profile) ([]*widget.FormItem, func(*profile.Profile)) {
+	var items []*widget.FormItem
+	var collect []func(*profile.Profile)
+
+	pass := widget.NewPasswordEntry()
+	pass.SetText(p.Password)
+	if p.Type == profile.TypeTUIC {
+		uuid := entry(p.UUID, "xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx")
+		cc := selectOf(congestionControls, orDefault(p.CongestionControl, "bbr"))
+		relay := selectOf(udpRelayModes, orDefault(p.UDPRelayMode, "native"))
+		items = append(items, widget.NewFormItem("UUID", uuid), widget.NewFormItem("Password", pass),
+			widget.NewFormItem("Congestion", cc), widget.NewFormItem("UDP relay", relay))
+		collect = append(collect, func(p *profile.Profile) {
+			p.UUID, p.CongestionControl, p.UDPRelayMode = strings.TrimSpace(uuid.Text), cc.Selected, relay.Selected
+		})
+	} else {
+		items = append(items, widget.NewFormItem("Password", pass))
+	}
+	collect = append(collect, func(p *profile.Profile) { p.Password = pass.Text })
+
+	if p.Type == profile.TypeHysteria2 {
+		obfs := entry(p.ObfsPassword, "salamander password (optional)")
+		up := entry(intText(p.UpMbps), "optional")
+		down := entry(intText(p.DownMbps), "optional")
+		items = append(items, widget.NewFormItem("Obfs password", obfs),
+			widget.NewFormItem("Up Mbps", up), widget.NewFormItem("Down Mbps", down))
+		collect = append(collect, func(p *profile.Profile) {
+			p.ObfsPassword = strings.TrimSpace(obfs.Text)
+			p.UpMbps, _ = strconv.Atoi(strings.TrimSpace(up.Text))
+			p.DownMbps, _ = strconv.Atoi(strings.TrimSpace(down.Text))
+		})
+	}
+
+	sni := entry(p.TLS.SNI, "server name (defaults to server)")
+	alpn := entry(strings.Join(p.TLS.ALPN, ","), "h3")
+	insecure := widget.NewCheck("Allow insecure certificate", nil)
+	insecure.SetChecked(p.TLS.Insecure)
+	tlsItems := []*widget.FormItem{
+		widget.NewFormItem("SNI", sni), widget.NewFormItem("ALPN", alpn), widget.NewFormItem("", insecure),
+	}
+	collect = append(collect, func(p *profile.Profile) {
+		p.TLS = profile.TLS{Mode: "tls", SNI: strings.TrimSpace(sni.Text), ALPN: splitComma(alpn.Text), Insecure: insecure.Checked}
+	})
+	return append(items, tlsItems...), func(p *profile.Profile) {
+		for _, c := range collect {
+			c(p)
+		}
+	}
+}
+
+func intText(n int) string {
+	if n == 0 {
+		return ""
+	}
+	return strconv.Itoa(n)
 }
 
 // saveProfile validates and stores a new or edited profile.

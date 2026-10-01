@@ -2,6 +2,7 @@ package profile
 
 import (
 	"encoding/base64"
+	"strings"
 	"testing"
 )
 
@@ -90,7 +91,8 @@ func TestLinkRoundTrip(t *testing.T) {
 func TestParseLinksSubscription(t *testing.T) {
 	sub := base64.StdEncoding.EncodeToString([]byte("trojan://a@h.com:443#one\n\nnot-a-link\nssh://u:p@h.com#two\n"))
 	profiles, errs := ParseLinks(sub)
-	if len(profiles) != 2 || len(errs) != 1 {
+	// Text that isn't a link is ignored, as in v2rayN.
+	if len(profiles) != 2 || len(errs) != 0 {
 		t.Fatalf("got %d profiles, %d errors", len(profiles), len(errs))
 	}
 }
@@ -104,5 +106,67 @@ func assertProfile(t *testing.T, got, want Profile) {
 		got.TLS.Fingerprint != want.TLS.Fingerprint || got.TLS.RealityPublicKey != want.TLS.RealityPublicKey ||
 		got.TLS.RealityShortID != want.TLS.RealityShortID {
 		t.Fatalf("profile mismatch\n got: %+v\nwant: %+v", got, want)
+	}
+}
+
+// TestParseLinksFromChatMessage covers what users actually copy: several links
+// in one message, separated by spaces or text, with CRLF line endings, an
+// unsupported protocol and a subscription URL mixed in.
+func TestParseLinksFromChatMessage(t *testing.T) {
+	vm := base64.StdEncoding.EncodeToString([]byte(`{"v":"2","ps":"🇩🇪 Germany | VMess","add":"de.example.com","port":443,"id":"bf000d23-0752-40b4-affe-68f7707a9661","net":"ws","path":"/","tls":"tls"}`))
+	msg := "🔥 New servers! Server 1: vless://bf000d23-0752-40b4-affe-68f7707a9661@1.2.3.4:443?security=reality&sni=a.com&pbk=jNXHt1yRo0vDuchQlIP6Z0ZvjT3KtzVI-T4E7RoLJS0#NL%201\r\n" +
+		"Server 2: trojan://pw@t.example.com:443#TR trojan://pw2@t2.example.com:443#TR2, " +
+		"vmess://" + vm + "\r\n" +
+		"hy2://secret@hy.example.com:8443?sni=hy.example.com&obfs=salamander&obfs-password=ob#HY2\n" +
+		"tuic://bf000d23-0752-40b4-affe-68f7707a9661:pw@tu.example.com:443?congestion_control=bbr&alpn=h3#TUIC\n" +
+		"wireguard://unsupported@w.example.com:51820#WG\n" +
+		"Subscription: https://panel.example.com/sub/abc (not an account)\n"
+	profiles, errs := ParseLinks(msg)
+	var names []string
+	for _, p := range profiles {
+		names = append(names, p.Type+":"+p.Name)
+	}
+	want := []string{"vless:NL 1", "trojan:TR", "trojan:TR2", "vmess:🇩🇪 Germany | VMess", "hysteria2:HY2", "tuic:TUIC"}
+	if strings.Join(names, ",") != strings.Join(want, ",") {
+		t.Fatalf("got  %v\nwant %v", names, want)
+	}
+	if len(errs) != 1 || !strings.Contains(errs[0].Error(), "wireguard") {
+		t.Fatalf("expected one unsupported-scheme error, got %v", errs)
+	}
+}
+
+func TestParseHysteria2AndTUIC(t *testing.T) {
+	hy, err := ParseLink("hysteria2://user:pass@hy.example.com:443,20000-30000/?sni=s.com&insecure=1&obfs=salamander&obfs-password=ob&alpn=h3#hy")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if hy.Password != "user:pass" || hy.Port != 443 || hy.ObfsPassword != "ob" || !hy.TLS.Insecure || hy.TLS.SNI != "s.com" {
+		t.Fatalf("unexpected hysteria2 profile: %+v", hy)
+	}
+	tu, err := ParseLink("tuic://bf000d23-0752-40b4-affe-68f7707a9661:pw@tu.com:8443?congestion_control=bbr&udp_relay_mode=quic&alpn=h3&allow_insecure=1#tu")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if tu.UUID != "bf000d23-0752-40b4-affe-68f7707a9661" || tu.Password != "pw" || tu.CongestionControl != "bbr" || tu.UDPRelayMode != "quic" || !tu.TLS.Insecure {
+		t.Fatalf("unexpected tuic profile: %+v", tu)
+	}
+	for _, p := range []Profile{hy, tu} {
+		again, err := ParseLink(p.Link())
+		if err != nil {
+			t.Fatalf("round trip %s: %v", p.Link(), err)
+		}
+		if again.Fingerprint() != p.Fingerprint() {
+			t.Fatalf("round trip changed the profile:\n%s\n%s", p.Link(), again.Link())
+		}
+	}
+}
+
+func TestExtractLinksBase64Subscription(t *testing.T) {
+	body := "trojan://a@h.com:443#one\r\nhy2://x@h.com:443#two\r\n"
+	// Some panels wrap base64 at 76 columns.
+	enc := base64.StdEncoding.EncodeToString([]byte(body))
+	wrapped := enc[:20] + "\n" + enc[20:]
+	if got := ExtractLinks(wrapped); len(got) != 2 {
+		t.Fatalf("got %v", got)
 	}
 }

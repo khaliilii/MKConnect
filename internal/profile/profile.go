@@ -17,10 +17,12 @@ const (
 	TypeVLESS       = "vless"
 	TypeTrojan      = "trojan"
 	TypeShadowsocks = "shadowsocks"
+	TypeHysteria2   = "hysteria2"
+	TypeTUIC        = "tuic"
 )
 
 // Types lists every supported protocol type.
-var Types = []string{TypeSSH, TypeVMess, TypeVLESS, TypeTrojan, TypeShadowsocks}
+var Types = []string{TypeSSH, TypeVMess, TypeVLESS, TypeTrojan, TypeShadowsocks, TypeHysteria2, TypeTUIC}
 
 // Profile is one server account. Fields that don't apply to a protocol are left empty.
 type Profile struct {
@@ -45,6 +47,15 @@ type Profile struct {
 
 	// Shadowsocks
 	Method string `json:"method,omitempty"`
+
+	// Hysteria2 (Password is the auth string)
+	ObfsPassword string `json:"obfs_password,omitempty"` // salamander obfuscation
+	UpMbps       int    `json:"up_mbps,omitempty"`
+	DownMbps     int    `json:"down_mbps,omitempty"`
+
+	// TUIC (UUID + Password)
+	CongestionControl string `json:"congestion_control,omitempty"` // bbr, cubic, new_reno
+	UDPRelayMode      string `json:"udp_relay_mode,omitempty"`     // native, quic
 
 	Transport Transport `json:"transport,omitzero"`
 	TLS       TLS       `json:"tls,omitzero"`
@@ -111,6 +122,14 @@ func (p *Profile) Validate() error {
 	case TypeShadowsocks:
 		if p.Password == "" || p.Method == "" {
 			return fmt.Errorf("shadowsocks: method and password are required")
+		}
+	case TypeHysteria2:
+		if p.Password == "" {
+			return fmt.Errorf("hysteria2: password is required")
+		}
+	case TypeTUIC:
+		if p.UUID == "" || p.Password == "" {
+			return fmt.Errorf("tuic: uuid and password are required")
 		}
 	default:
 		return fmt.Errorf("unknown profile type %q", p.Type)

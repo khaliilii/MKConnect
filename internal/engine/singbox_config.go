@@ -159,6 +159,27 @@ func singBoxOutbound(p *profile.Profile) (obj, error) {
 	case profile.TypeShadowsocks:
 		out["type"], out["method"], out["password"] = "shadowsocks", p.Method, p.Password
 		return out, nil
+	case profile.TypeHysteria2:
+		out["type"], out["password"] = "hysteria2", p.Password
+		if p.ObfsPassword != "" {
+			out["obfs"] = obj{"type": "salamander", "password": p.ObfsPassword}
+		}
+		if p.UpMbps > 0 {
+			out["up_mbps"] = p.UpMbps
+		}
+		if p.DownMbps > 0 {
+			out["down_mbps"] = p.DownMbps
+		}
+		out["tls"] = quicTLS(p, nil)
+		return out, nil
+	case profile.TypeTUIC:
+		out["type"], out["uuid"], out["password"] = "tuic", p.UUID, p.Password
+		out["congestion_control"] = orDefault(p.CongestionControl, "bbr")
+		if p.UDPRelayMode != "" {
+			out["udp_relay_mode"] = p.UDPRelayMode
+		}
+		out["tls"] = quicTLS(p, []string{"h3"})
+		return out, nil
 	default:
 		return nil, fmt.Errorf("sing-box: unsupported profile type %q", p.Type)
 	}
@@ -243,6 +264,20 @@ func singBoxTLS(p *profile.Profile) obj {
 	}
 	if fp != "" {
 		tls["utls"] = obj{"enabled": true, "fingerprint": fp}
+	}
+	return tls
+}
+
+// quicTLS is the TLS block for QUIC-based protocols, which always use TLS.
+func quicTLS(p *profile.Profile, defaultALPN []string) obj {
+	tls := obj{"enabled": true, "server_name": orDefault(p.TLS.SNI, p.Server)}
+	if alpn := p.TLS.ALPN; len(alpn) > 0 {
+		tls["alpn"] = alpn
+	} else if len(defaultALPN) > 0 {
+		tls["alpn"] = defaultALPN
+	}
+	if p.TLS.Insecure {
+		tls["insecure"] = true
 	}
 	return tls
 }

@@ -244,3 +244,45 @@ func TestAbout(t *testing.T) {
 	u.showAbout()
 	screenshot(t, u.win, "about")
 }
+
+// TestImportClipboardButton is the one-click import: a chat message with
+// several links of different protocols, then the same message again.
+func TestImportClipboardButton(t *testing.T) {
+	u := newTestUI(t)
+	msg := "Free servers 👇\n" +
+		"vless://bf000d23-0752-40b4-affe-68f7707a9661@1.2.3.4:443?security=tls&sni=a.com#VLESS-1 " +
+		"trojan://pw@t.example.com:443#Trojan-1\r\n" +
+		"hy2://secret@hy.example.com:443?sni=hy.example.com#HY2-1\n" +
+		"tuic://bf000d23-0752-40b4-affe-68f7707a9661:pw@tu.example.com:443?congestion_control=bbr#TUIC-1\n" +
+		"wireguard://x@w.example.com:51820#WG\n"
+	u.app.Clipboard().SetContent(msg)
+	u.importClipboard()
+	if len(u.store.Profiles) != 3+4 {
+		t.Fatalf("got %d profiles, want 7", len(u.store.Profiles))
+	}
+	got := map[string]bool{}
+	for _, p := range u.store.Profiles {
+		got[p.Type] = true
+	}
+	for _, typ := range []string{profile.TypeVLESS, profile.TypeTrojan, profile.TypeHysteria2, profile.TypeTUIC} {
+		if !got[typ] {
+			t.Errorf("no %s profile imported", typ)
+		}
+	}
+	screenshot(t, u.win, "clipboard-import")
+
+	u.importClipboard() // same content: nothing new
+	if len(u.store.Profiles) != 7 {
+		t.Fatalf("duplicates imported: %d profiles", len(u.store.Profiles))
+	}
+	saved, _ := profile.Load(u.store.Path())
+	if len(saved.Profiles) != 7 {
+		t.Fatal("import not saved")
+	}
+
+	u.app.Clipboard().SetContent("")
+	u.importClipboard() // empty clipboard must not panic or add anything
+	if len(u.store.Profiles) != 7 {
+		t.Fatal("empty clipboard changed the list")
+	}
+}

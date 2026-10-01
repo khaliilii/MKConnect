@@ -47,6 +47,9 @@ func newProfileListCmd() *cobra.Command {
 					mark = "*"
 				}
 				transport := orDash(p.Transport.Network)
+				if p.Type == profile.TypeHysteria2 || p.Type == profile.TypeTUIC {
+					transport = "quic"
+				}
 				if p.TLS.Mode != "" {
 					transport += "+" + p.TLS.Mode
 				}
@@ -128,6 +131,11 @@ func (pf *profileFlags) register(f *pflag.FlagSet) {
 	f.StringVar(&p.Security, "security", "", "VMess cipher (auto, aes-128-gcm, chacha20-poly1305, none)")
 	f.StringVar(&p.Flow, "flow", "", "VLESS flow, e.g. xtls-rprx-vision")
 	f.StringVar(&p.Method, "method", "", "Shadowsocks method")
+	f.StringVar(&p.ObfsPassword, "obfs-password", "", "Hysteria2 salamander obfuscation password")
+	f.IntVar(&p.UpMbps, "up-mbps", 0, "Hysteria2 upload bandwidth")
+	f.IntVar(&p.DownMbps, "down-mbps", 0, "Hysteria2 download bandwidth")
+	f.StringVar(&p.CongestionControl, "congestion", "", "TUIC congestion control: bbr, cubic, new_reno")
+	f.StringVar(&p.UDPRelayMode, "udp-relay", "", "TUIC UDP relay mode: native, quic")
 	f.StringVar(&p.Transport.Network, "network", "", "transport: tcp, ws, grpc, httpupgrade, xhttp")
 	f.StringVar(&p.Transport.Path, "path", "", "ws / httpupgrade / xhttp path")
 	f.StringVar(&p.Transport.Host, "host", "", "ws / httpupgrade / xhttp Host header")
@@ -161,6 +169,11 @@ func (pf *profileFlags) apply(f *pflag.FlagSet, dst *profile.Profile) error {
 	set("security", func() { dst.Security = src.Security })
 	set("flow", func() { dst.Flow = src.Flow })
 	set("method", func() { dst.Method = src.Method })
+	set("obfs-password", func() { dst.ObfsPassword = src.ObfsPassword })
+	set("up-mbps", func() { dst.UpMbps = src.UpMbps })
+	set("down-mbps", func() { dst.DownMbps = src.DownMbps })
+	set("congestion", func() { dst.CongestionControl = src.CongestionControl })
+	set("udp-relay", func() { dst.UDPRelayMode = src.UDPRelayMode })
 	set("network", func() { dst.Transport.Network = src.Transport.Network })
 	set("path", func() { dst.Transport.Path = src.Transport.Path })
 	set("host", func() { dst.Transport.Host = src.Transport.Host })
@@ -203,8 +216,15 @@ func newProfileAddCmd() *cobra.Command {
 				return err
 			}
 			p := profile.Profile{Type: strings.ToLower(args[0])}
-			if p.Type == "ss" {
+			switch p.Type {
+			case "ss":
 				p.Type = profile.TypeShadowsocks
+			case "hy2":
+				p.Type = profile.TypeHysteria2
+			case profile.TypeHysteria2, profile.TypeTUIC:
+			}
+			if p.Type == profile.TypeHysteria2 || p.Type == profile.TypeTUIC {
+				p.TLS.Mode = "tls" // QUIC protocols always use TLS
 			}
 			if p.Type == profile.TypeSSH {
 				p.Port = 22
@@ -324,10 +344,12 @@ func newProfileUseCmd() *cobra.Command {
 
 func newProfileImportCmd() *cobra.Command {
 	var file, subURL, legacy, group string
+	var fromClipboard bool
 	cmd := &cobra.Command{
 		Use:   "import [link...]",
 		Short: "Import share links, a subscription, or a v1 config.json",
 		Example: `  mkconnect profile import 'vmess://...' 'vless://...'
+  mkconnect profile import --clipboard
   mkconnect profile import --file links.txt
   mkconnect profile import --url https://example.com/sub
   mkconnect profile import --legacy config.json`,
@@ -339,6 +361,13 @@ func newProfileImportCmd() *cobra.Command {
 			var text strings.Builder
 			for _, a := range args {
 				text.WriteString(a + "\n")
+			}
+			if fromClipboard {
+				clip, err := readClipboard()
+				if err != nil {
+					return fmt.Errorf("read clipboard: %w", err)
+				}
+				text.WriteString(clip + "\n")
 			}
 			if file != "" {
 				data, err := os.ReadFile(file)
@@ -385,15 +414,27 @@ func newProfileImportCmd() *cobra.Command {
 			for _, e := range errs {
 				fmt.Fprintf(os.Stderr, "⚠️  skipped: %v\n", e)
 			}
+			existing := 0
 			for _, p := range profiles {
 				p.Group = groupID
-				if _, err := store.Add(p); err != nil {
+				ok, err := store.AddUnique(p)
+				if err != nil {
 					fmt.Fprintf(os.Stderr, "⚠️  skipped %s: %v\n", p.Name, err)
+					continue
+				}
+				if !ok {
+					existing++
 					continue
 				}
 				added++
 			}
+			if existing > 0 {
+				fmt.Printf("ℹ️  %d account(s) already in the list\n", existing)
+			}
 			if added == 0 && subURL == "" {
+				if existing > 0 {
+					return nil
+				}
 				return fmt.Errorf("nothing imported")
 			}
 			if err := store.Save(); err != nil {
@@ -403,6 +444,7 @@ func newProfileImportCmd() *cobra.Command {
 			return nil
 		},
 	}
+	cmd.Flags().BoolVar(&fromClipboard, "clipboard", false, "import the share links on the clipboard")
 	cmd.Flags().StringVar(&file, "file", "", "file with one link per line (or base64 subscription)")
 	cmd.Flags().StringVar(&subURL, "url", "", "subscription URL (creates a group that can be refreshed with `sub update`)")
 	cmd.Flags().StringVar(&group, "group", "", "put the imported accounts in this group (created if missing)")

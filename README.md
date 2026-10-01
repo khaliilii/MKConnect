@@ -1,15 +1,17 @@
 # MKConnect
 
-A multi-account client for **SSH, VMess, VLESS, Trojan and Shadowsocks**, with a local proxy, LAN sharing and a TUN (virtual network interface) mode.
+A multi-account client for **SSH, VMess, VLESS, Trojan, Shadowsocks, Hysteria2 and TUIC**, with a local proxy, LAN sharing and a TUN (virtual network interface) mode.
 
 ## Features
 
-- Any number of accounts, added by hand or imported in bulk from `vmess://`, `vless://`, `trojan://`, `ss://`, `ssh://` links
+- Any number of accounts, added by hand or imported in bulk from `vmess://`, `vless://`, `trojan://`, `ss://`, `ssh://`,
+  `hysteria2://` (`hy2://`) and `tuic://` links: one click on **Clipboard** imports every link found in the copied
+  text (one or many, in a chat message, space- or line-separated, or base64), detects each protocol and skips duplicates
 - Groups, and subscriptions (like Hiddify): a URL whose accounts are refreshed automatically, with the data
   used / remaining and expiry date reported by the provider (`subscription-userinfo`)
 - Choice of core:
   - **sing-box** (built in): all protocols including SSH, native TUN
-  - **xray** (built in): VMess / VLESS / Trojan / Shadowsocks, incl. `xhttp`
+  - **xray** (built in): VMess / VLESS / Trojan / Shadowsocks, incl. `xhttp` (Hysteria2 and TUIC need sing-box)
   - **external**: run your own `sing-box` or `xray` binary with the generated config
   - SSH accounts on the xray core use the built-in SSH client (auto-reconnect, keepalive)
 - **proxy** mode: SOCKS5 + HTTP on `127.0.0.1:1080` (SOCKS5 only for xray / built-in SSH)
@@ -41,6 +43,7 @@ The desktop app and the CLI share the same profiles file. Set `MKCONNECT_CONFIG`
 # add accounts
 mkconnect profile add ssh --name home --server 1.2.3.4 --user root --ask-password
 mkconnect profile import 'vless://...' 'vmess://...'
+mkconnect profile import --clipboard
 mkconnect profile import --group work 'vless://...' 'trojan://...'
 mkconnect sub add https://example.com/subscription
 mkconnect sub ls                                    # usage and expiry per subscription

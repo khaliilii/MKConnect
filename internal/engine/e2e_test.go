@@ -41,6 +41,9 @@ import (
 
 const testUUID = "bf000d23-0752-40b4-affe-68f7707a9661"
 
+// registerQUICServerInbounds is set by e2e_quic_test.go when built with with_quic.
+var registerQUICServerInbounds func(*inbound.Registry)
+
 // startProtocolServer runs a real VMess/VLESS/Trojan/Shadowsocks server
 // (sing-box inbounds) so the clients can be tested end to end.
 func startProtocolServer(t *testing.T, inbounds []obj) {
@@ -50,6 +53,9 @@ func startProtocolServer(t *testing.T, inbounds []obj) {
 	vless.RegisterInbound(ins)
 	trojan.RegisterInbound(ins)
 	shadowsocks.RegisterInbound(ins)
+	if registerQUICServerInbounds != nil {
+		registerQUICServerInbounds(ins)
+	}
 	outs := outbound.NewRegistry()
 	direct.RegisterOutbound(outs)
 	dnsReg := dns.NewTransportRegistry()

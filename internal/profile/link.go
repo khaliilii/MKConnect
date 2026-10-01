@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net"
 	"net/url"
+	"regexp"
 	"strconv"
 	"strings"
 )
@@ -30,6 +31,10 @@ func ParseLink(link string) (Profile, error) {
 		p, err = parseShadowsocks(link)
 	case "ssh":
 		p, err = parseSSH(link)
+	case "hysteria2", "hy2":
+		p, err = parseHysteria2(link)
+	case "tuic":
+		p, err = parseTUIC(link)
 	default:
 		return Profile{}, fmt.Errorf("unsupported link scheme %q", scheme)
 	}
@@ -42,25 +47,40 @@ func ParseLink(link string) (Profile, error) {
 	return p, p.Validate()
 }
 
-// ParseLinks parses newline-separated links, e.g. a decoded subscription. It
-// also accepts a base64-encoded blob of links.
-func ParseLinks(text string) ([]Profile, []error) {
+// linkPattern finds share links inside arbitrary text, e.g. a chat message
+// like "Server 1: vless://... Server 2: trojan://...".
+var linkPattern = regexp.MustCompile(`(?i)\b[a-z][a-z0-9+.-]*://[^\s"'<>` + "`" + `]+`)
+
+// ExtractLinks returns the share links found in text, in order. Plain
+// http(s) URLs (e.g. a subscription address) are not share links and are skipped.
+// A base64-encoded list (subscription content) is decoded first.
+func ExtractLinks(text string) []string {
 	text = strings.TrimSpace(text)
 	if !strings.Contains(text, "://") {
-		if decoded, err := decodeBase64(text); err == nil {
+		if decoded, err := decodeBase64(strings.Join(strings.Fields(text), "")); err == nil {
 			text = string(decoded)
 		}
 	}
+	var links []string
+	for _, l := range linkPattern.FindAllString(text, -1) {
+		scheme, _, _ := strings.Cut(strings.ToLower(l), "://")
+		if scheme == "http" || scheme == "https" {
+			continue
+		}
+		links = append(links, strings.TrimRight(l, ".,;)]}"))
+	}
+	return links
+}
+
+// ParseLinks parses every share link found in text (one or many, separated by
+// newlines, spaces or surrounding text, or a base64-encoded subscription body).
+func ParseLinks(text string) ([]Profile, []error) {
 	var (
 		out  []Profile
 		errs []error
 	)
-	for _, line := range strings.Split(text, "\n") {
-		line = strings.TrimSpace(line)
-		if line == "" || strings.HasPrefix(line, "#") {
-			continue
-		}
-		p, err := ParseLink(line)
+	for _, link := range ExtractLinks(text) {
+		p, err := ParseLink(link)
 		if err != nil {
 			errs = append(errs, err)
 			continue
@@ -232,6 +252,60 @@ func parseSSH(link string) (Profile, error) {
 	}, nil
 }
 
+// portHopping matches a port-hopping authority ("host:443,20000-30000") to its
+// first port, which net/url can parse. Port hopping itself isn't supported.
+var portHopping = regexp.MustCompile(`^([^/?#]*:)(\d+)[,-][\d,-]*`)
+
+func parseHysteria2(link string) (Profile, error) {
+	scheme, rest, _ := strings.Cut(link, "://")
+	u, err := url.Parse(scheme + "://" + portHopping.ReplaceAllString(rest, "${1}${2}"))
+	if err != nil {
+		return Profile{}, err
+	}
+	port := 443
+	if u.Port() != "" {
+		if port, err = strconv.Atoi(u.Port()); err != nil {
+			return Profile{}, fmt.Errorf("hysteria2: bad port %q", u.Port())
+		}
+	}
+	auth := u.User.Username()
+	if pass, ok := u.User.Password(); ok {
+		auth += ":" + pass
+	}
+	q := u.Query()
+	p := Profile{
+		Name: u.Fragment, Type: TypeHysteria2, Server: u.Hostname(), Port: port, Password: auth,
+		TLS: TLS{Mode: "tls", SNI: q.Get("sni"), ALPN: splitList(q.Get("alpn")),
+			Insecure: q.Get("insecure") == "1"},
+	}
+	if q.Get("obfs") == "salamander" {
+		p.ObfsPassword = q.Get("obfs-password")
+	}
+	p.UpMbps, _ = strconv.Atoi(q.Get("upmbps"))
+	p.DownMbps, _ = strconv.Atoi(q.Get("downmbps"))
+	return p, nil
+}
+
+func parseTUIC(link string) (Profile, error) {
+	u, err := url.Parse(link)
+	if err != nil {
+		return Profile{}, err
+	}
+	port, err := strconv.Atoi(u.Port())
+	if err != nil {
+		return Profile{}, fmt.Errorf("tuic: bad port %q", u.Port())
+	}
+	pass, _ := u.User.Password()
+	q := u.Query()
+	insecure := q.Get("allow_insecure") == "1" || q.Get("insecure") == "1"
+	return Profile{
+		Name: u.Fragment, Type: TypeTUIC, Server: u.Hostname(), Port: port,
+		UUID: u.User.Username(), Password: pass,
+		CongestionControl: q.Get("congestion_control"), UDPRelayMode: q.Get("udp_relay_mode"),
+		TLS: TLS{Mode: "tls", SNI: q.Get("sni"), ALPN: splitList(q.Get("alpn")), Insecure: insecure},
+	}, nil
+}
+
 // Link renders the profile back into a share link.
 func (p *Profile) Link() string {
 	switch p.Type {
@@ -274,6 +348,30 @@ func (p *Profile) Link() string {
 	case TypeShadowsocks:
 		info := base64.RawURLEncoding.EncodeToString([]byte(p.Method + ":" + p.Password))
 		return "ss://" + info + "@" + p.Address() + "#" + url.PathEscape(p.Name)
+	case TypeHysteria2:
+		q := url.Values{}
+		setIf(q, "sni", p.TLS.SNI)
+		setIf(q, "alpn", strings.Join(p.TLS.ALPN, ","))
+		if p.TLS.Insecure {
+			q.Set("insecure", "1")
+		}
+		if p.ObfsPassword != "" {
+			q.Set("obfs", "salamander")
+			q.Set("obfs-password", p.ObfsPassword)
+		}
+		u := url.URL{Scheme: "hysteria2", User: url.User(p.Password), Host: p.Address(), Path: "/", RawQuery: q.Encode(), Fragment: p.Name}
+		return u.String()
+	case TypeTUIC:
+		q := url.Values{}
+		setIf(q, "congestion_control", p.CongestionControl)
+		setIf(q, "udp_relay_mode", p.UDPRelayMode)
+		setIf(q, "sni", p.TLS.SNI)
+		setIf(q, "alpn", strings.Join(p.TLS.ALPN, ","))
+		if p.TLS.Insecure {
+			q.Set("allow_insecure", "1")
+		}
+		u := url.URL{Scheme: "tuic", User: url.UserPassword(p.UUID, p.Password), Host: p.Address(), RawQuery: q.Encode(), Fragment: p.Name}
+		return u.String()
 	case TypeSSH:
 		// The password is deliberately left out of exported SSH links.
 		u := url.URL{Scheme: "ssh", User: url.User(p.User), Host: p.Address(), Fragment: p.Name}

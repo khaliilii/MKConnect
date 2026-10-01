@@ -37,6 +37,9 @@ import (
 	"github.com/sagernet/sing/service"
 )
 
+// registerQUICOutbounds adds Hysteria2 and TUIC when built with the with_quic tag.
+var registerQUICOutbounds func(*outbound.Registry)
+
 func init() {
 	startSingBox = newSingBox
 	parseSingBox = func(config []byte) error {
@@ -127,6 +130,9 @@ func singBoxContext(ctx context.Context) context.Context {
 	vless.RegisterOutbound(outbounds)
 	trojan.RegisterOutbound(outbounds)
 	ssh.RegisterOutbound(outbounds)
+	if registerQUICOutbounds != nil {
+		registerQUICOutbounds(outbounds)
+	}
 
 	dnsTransports := dns.NewTransportRegistry()
 	transport.RegisterTCP(dnsTransports)

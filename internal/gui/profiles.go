@@ -21,6 +21,8 @@ var typeLabels = map[string]string{
 	profile.TypeVLESS:       "VLESS",
 	profile.TypeTrojan:      "Trojan",
 	profile.TypeShadowsocks: "Shadowsocks",
+	profile.TypeHysteria2:   "Hysteria2",
+	profile.TypeTUIC:        "TUIC",
 }
 
 // Group filter values besides group ids.
@@ -83,7 +85,8 @@ func (u *ui) newProfilesPanel() fyne.CanvasObject {
 	})
 	addBtn.Importance = widget.HighImportance
 
-	importBtn := widget.NewButtonWithIcon("Import", theme.ContentPasteIcon(), u.showImport)
+	clipBtn := widget.NewButtonWithIcon("Clipboard", theme.ContentPasteIcon(), u.importClipboard)
+	importBtn := widget.NewButtonWithIcon("Import", theme.DownloadIcon(), u.showImport)
 	editBtn := widget.NewButtonWithIcon("", theme.DocumentCreateIcon(), func() {
 		if p := u.activeProfile(); p != nil {
 			u.openEditor(*p, false)
@@ -99,7 +102,7 @@ func (u *ui) newProfilesPanel() fyne.CanvasObject {
 	deleteBtn := widget.NewButtonWithIcon("", theme.DeleteIcon(), u.confirmDelete)
 	aboutBtn := widget.NewButtonWithIcon("About", theme.InfoIcon(), u.showAbout)
 
-	toolbar := container.NewBorder(nil, nil, container.NewHBox(addBtn, importBtn), container.NewHBox(editBtn, copyBtn, deleteBtn))
+	toolbar := container.NewBorder(nil, nil, container.NewHBox(addBtn, clipBtn, importBtn), container.NewHBox(editBtn, copyBtn, deleteBtn))
 	title := container.NewBorder(nil, nil, widget.NewLabelWithStyle("Accounts", fyne.TextAlignLeading, fyne.TextStyle{Bold: true}), aboutBtn)
 
 	u.groupSelect = widget.NewSelect(nil, func(label string) {
@@ -127,6 +130,9 @@ func (u *ui) newProfilesPanel() fyne.CanvasObject {
 
 func profileSummary(p *profile.Profile) string {
 	parts := []string{typeLabels[p.Type], p.Address()}
+	if p.Type == profile.TypeHysteria2 || p.Type == profile.TypeTUIC {
+		return strings.Join(append(parts, "quic"), " · ")
+	}
 	if p.Transport.Network != "" {
 		parts = append(parts, p.Transport.Network)
 	}
@@ -508,4 +514,68 @@ func (u *ui) checkClipboard() {
 	msg := fmt.Sprintf("Added %d account(s) from the clipboard", added)
 	u.logf("📋 %s", msg)
 	u.app.SendNotification(fyne.NewNotification("MKConnect", msg))
+}
+
+// importClipboard is the one-click "import from clipboard" of v2rayN/v2rayNG:
+// it takes one or many share links (in any surrounding text or base64), or a
+// subscription URL, detects each protocol and adds the new accounts.
+func (u *ui) importClipboard() {
+	text := strings.TrimSpace(u.app.Clipboard().Content())
+	u.lastClipboard = text // don't import it a second time on focus
+	if text == "" {
+		dialog.ShowInformation("Clipboard", "The clipboard is empty.\nCopy one or more share links (or a subscription URL) and try again.", u.win)
+		return
+	}
+	if isURL(text) {
+		g := u.store.AddGroup("", text)
+		g.Name = profile.SubscriptionName(text, "")
+		u.groupFilter = g.ID
+		u.save()
+		u.refreshProfiles()
+		u.updateSubscription(g.ID, true)
+		return
+	}
+
+	profiles, errs := profile.ParseLinks(text)
+	if len(profiles) == 0 && len(errs) == 0 {
+		dialog.ShowInformation("Clipboard", "No share links found in the clipboard.\n\nSupported: vmess://, vless://, trojan://, ss://, ssh://,\nhysteria2:// (hy2://), tuic://, or a subscription URL.", u.win)
+		return
+	}
+	added, existing := 0, 0
+	var lastID string
+	for _, p := range profiles {
+		ok, err := u.store.AddUnique(p)
+		switch {
+		case err != nil:
+			errs = append(errs, fmt.Errorf("%s: %w", p.Name, err))
+		case ok:
+			added++
+			lastID = u.store.Profiles[len(u.store.Profiles)-1].ID
+		default:
+			existing++
+		}
+	}
+	if added > 0 {
+		if added == 1 || u.store.Active == "" {
+			u.store.Active = lastID
+		}
+		u.groupFilter = filterAll
+		u.save()
+		u.refreshProfiles()
+	}
+	lines := []string{fmt.Sprintf("Added %d account(s).", added)}
+	if existing > 0 {
+		lines = append(lines, fmt.Sprintf("%d already in the list.", existing))
+	}
+	if len(errs) > 0 {
+		lines = append(lines, "", fmt.Sprintf("Skipped %d:", len(errs)))
+		for i, e := range errs {
+			if i == 10 {
+				lines = append(lines, fmt.Sprintf("… and %d more", len(errs)-10))
+				break
+			}
+			lines = append(lines, "• "+e.Error())
+		}
+	}
+	dialog.ShowInformation("Import from clipboard", strings.Join(lines, "\n"), u.win)
 }

@@ -2,6 +2,7 @@ package engine
 
 import (
 	"fmt"
+	"runtime"
 	"strconv"
 	"strings"
 
@@ -28,7 +29,13 @@ type tunOptions struct {
 	// ExcludeAddrs are routed around the TUN (the proxy server itself, so the
 	// core's own connection doesn't loop back into the tunnel).
 	ExcludeAddrs []string
+	// Gateway routes traffic forwarded from other interfaces (gateway mode).
+	Gateway bool
 }
+
+// TUNName is the name of the TUN interface on systems that allow choosing it
+// (Windows needs a fixed name to set up Internet Connection Sharing).
+const TUNName = "MKConnect"
 
 // singBoxConfig builds a complete sing-box config that exposes a mixed
 // (SOCKS5 + HTTP) proxy and, when tun is set, a TUN interface.
@@ -86,6 +93,19 @@ func singBoxBase(s *profile.Settings, proxyOut obj, tun *tunOptions) obj {
 		}
 		if len(tun.ExcludeAddrs) > 0 {
 			t["route_exclude_address"] = tun.ExcludeAddrs
+		}
+		if runtime.GOOS == "windows" {
+			t["interface_name"] = TUNName
+		}
+		if tun.Gateway {
+			switch runtime.GOOS {
+			case "linux":
+				// nftables-based redirection also captures traffic forwarded from LAN devices.
+				t["auto_redirect"] = true
+			case "windows":
+				// strict_route's firewall rules would block the ICS side (DHCP/DNS for clients).
+				t["strict_route"] = false
+			}
 		}
 		inbounds = append(inbounds, t)
 

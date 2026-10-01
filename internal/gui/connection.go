@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net"
 	"runtime"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -16,6 +17,7 @@ import (
 	"fyne.io/fyne/v2/widget"
 
 	"github.com/khaliilii/MKConnect/internal/engine"
+	"github.com/khaliilii/MKConnect/internal/gateway"
 	"github.com/khaliilii/MKConnect/internal/profile"
 )
 
@@ -61,6 +63,32 @@ func (u *ui) newConnectionPanel() fyne.CanvasObject {
 	tunWarning.Wrapping = fyne.TextWrapWord
 	tunWarning.Importance = widget.WarningImportance
 
+	// Gateway mode: route devices on other network interfaces through the tunnel.
+	shareNames := map[string]string{} // check label -> interface name
+	share := widget.NewCheckGroup(nil, nil)
+	shareHint := widget.NewLabel("")
+	shareHint.Wrapping = fyne.TextWrapWord
+	shareHint.Importance = widget.LowImportance
+	shareHint.SizeName = theme.SizeNameCaptionText
+	loadInterfaces := func() {
+		ifaces, _ := gateway.Interfaces()
+		shareNames = map[string]string{}
+		var options, selected []string
+		for _, ifc := range ifaces {
+			label := ifc.String()
+			shareNames[label] = ifc.Name
+			options = append(options, label)
+			if slices.Contains(s.ShareInterfaces, ifc.Name) {
+				selected = append(selected, label)
+			}
+		}
+		share.Options, share.Selected = options, selected
+		share.Refresh()
+	}
+	loadInterfaces()
+	refreshIfaces := widget.NewButtonWithIcon("", theme.ViewRefreshIcon(), loadInterfaces)
+	shareBox := container.NewVBox(container.NewBorder(nil, nil, nil, refreshIfaces, share), shareHint)
+
 	port := entry(strconv.Itoa(s.ListenPort), "1080")
 	port.Validator = validatePort
 	lan := widget.NewCheck("Share with other devices on the network (LAN)", nil)
@@ -79,6 +107,8 @@ func (u *ui) newConnectionPanel() fyne.CanvasObject {
 	updateVisibility := func() {
 		form.setVisible(extBox, s.Core == profile.CoreExternal)
 		form.setVisible(tunWarning, s.Mode == profile.ModeTUN && !isElevated())
+		form.setVisible(shareBox, s.Mode == profile.ModeTUN && !isMobile)
+		shareHint.SetText(shareHintText(s.ShareInterfaces))
 		form.setVisible(lanInfo, s.AllowLAN)
 		lanInfo.SetText(lanAddresses(s))
 	}
@@ -103,6 +133,18 @@ func (u *ui) newConnectionPanel() fyne.CanvasObject {
 	mode.OnChanged = func(string) { changed() }
 	lan.OnChanged = func(bool) { changed() }
 	clipboard.OnChanged = func(bool) { changed() }
+	share.OnChanged = func(labels []string) {
+		if runtime.GOOS == "windows" && len(labels) > 1 {
+			// Internet Connection Sharing supports one adapter: keep the newest choice.
+			share.SetSelected(labels[len(labels)-1:])
+			return
+		}
+		s.ShareInterfaces = s.ShareInterfaces[:0]
+		for _, l := range labels {
+			s.ShareInterfaces = append(s.ShareInterfaces, shareNames[l])
+		}
+		changed()
+	}
 	for _, e := range []*widget.Entry{extPath, port, proxyUser, proxyPass, remoteDNS} {
 		e.OnChanged = func(string) { changed() }
 	}
@@ -112,6 +154,7 @@ func (u *ui) newConnectionPanel() fyne.CanvasObject {
 		{Text: "", Widget: extBox},
 		{Text: "Mode", Widget: mode},
 		{Text: "", Widget: tunWarning},
+		{Text: "Share with", Widget: shareBox},
 		{Text: "Local port", Widget: port},
 		{Text: "", Widget: lan},
 		{Text: "", Widget: lanInfo},
@@ -349,4 +392,12 @@ func tunPrivilegeHint() string {
 		return "TUN mode needs administrator rights: right-click MKConnect and choose \"Run as administrator\"."
 	}
 	return "TUN mode needs root: start MKConnect with sudo."
+}
+
+func shareHintText(shared []string) string {
+	if len(shared) == 0 {
+		return "Optional: tick network cards (Ethernet, a second Wi-Fi, hotspot) whose devices should " +
+			"reach the internet through this tunnel (gateway mode)."
+	}
+	return gateway.Hint(shared)
 }

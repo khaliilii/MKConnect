@@ -53,6 +53,9 @@ func newSession(p *profile.Profile, s *profile.Settings, primary Engine) *Sessio
 	}
 	if s.Mode == profile.ModeTUN {
 		inbounds = append(inbounds, "TUN 172.19.0.1/30 (all system traffic)")
+		if len(s.ShareInterfaces) > 0 {
+			inbounds = append(inbounds, "Gateway for devices on "+strings.Join(s.ShareInterfaces, ", "))
+		}
 	}
 
 	out := []string{strings.ToUpper(p.Type[:1]) + p.Type[1:], p.Address()}

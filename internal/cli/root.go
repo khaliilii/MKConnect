@@ -8,6 +8,7 @@ import (
 	"github.com/spf13/cobra"
 	"golang.org/x/term"
 
+	"github.com/khaliilii/MKConnect/internal/gateway"
 	"github.com/khaliilii/MKConnect/internal/profile"
 	"github.com/khaliilii/MKConnect/internal/version"
 )
@@ -29,7 +30,7 @@ func NewRoot() *cobra.Command {
 	root.RunE = run.RunE
 	root.Flags().AddFlagSet(run.Flags())
 
-	root.AddCommand(run, newProfileCmd(), newSubCmd(), newSettingsCmd(), newCoresCmd())
+	root.AddCommand(run, newProfileCmd(), newSubCmd(), newSettingsCmd(), newCoresCmd(), newInterfacesCmd())
 	return root
 }
 
@@ -67,4 +68,21 @@ func readSecret(prompt string) (string, error) {
 	var s string
 	_, err := fmt.Scanln(&s)
 	return s, err
+}
+
+func newInterfacesCmd() *cobra.Command {
+	return &cobra.Command{
+		Use:   "interfaces",
+		Short: "List network interfaces that can share the tunnel (for --share)",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			ifaces, err := gateway.Interfaces()
+			if err != nil {
+				return err
+			}
+			for _, ifc := range ifaces {
+				fmt.Println(ifc)
+			}
+			return nil
+		},
+	}
 }

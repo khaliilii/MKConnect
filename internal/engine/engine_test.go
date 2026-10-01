@@ -2,7 +2,9 @@ package engine
 
 import (
 	"net"
+	"runtime"
 	"strconv"
+	"strings"
 	"testing"
 	"time"
 
@@ -154,5 +156,40 @@ func TestPinServerKeepsHostname(t *testing.T) {
 	}
 	if net.ParseIP(p.Server) == nil || p.TLS.SNI != "localhost" || p.Transport.Host != "localhost" || len(exclude) == 0 {
 		t.Fatalf("unexpected: %+v %v", p, exclude)
+	}
+}
+
+func TestTUNGatewayConfig(t *testing.T) {
+	s := testSettings(t)
+	s.Mode, s.ShareInterfaces = profile.ModeTUN, []string{"eth1"}
+	cfg, err := singBoxConfig(&testProfiles[0], &s, &tunOptions{Gateway: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var tun obj
+	for _, in := range cfg["inbounds"].([]obj) {
+		if in["type"] == "tun" {
+			tun = in
+		}
+	}
+	switch runtime.GOOS {
+	case "linux":
+		if tun["auto_redirect"] != true {
+			t.Fatal("gateway mode on Linux needs auto_redirect")
+		}
+	case "windows":
+		if tun["interface_name"] != TUNName || tun["strict_route"] != false {
+			t.Fatalf("windows gateway tun: %v", tun)
+		}
+	}
+	if parseSingBox != nil {
+		data, _ := marshal(cfg)
+		if err := parseSingBox(data); err != nil {
+			t.Fatal(err)
+		}
+	}
+	session := newSession(&testProfiles[0], &s, nil)
+	if !strings.Contains(strings.Join(session.Inbounds, "|"), "Gateway for devices on eth1") {
+		t.Fatalf("session doesn't show the gateway: %v", session.Inbounds)
 	}
 }

@@ -17,6 +17,11 @@ A multi-account client for **SSH, VMess, VLESS, Trojan, Shadowsocks, Hysteria2 a
 - **proxy** mode: SOCKS5 + HTTP on `127.0.0.1:1080` (SOCKS5 only for xray / built-in SSH)
 - **LAN sharing**: listen on all interfaces, optionally with a username/password, so other devices can use the proxy
 - **tun** mode: a virtual network interface that routes the whole system through the tunnel (needs root / Administrator)
+- **gateway** (TUN mode, "Share with"): devices on other network interfaces (Ethernet, a second Wi-Fi, a hotspot)
+  reach the internet through the tunnel without any proxy settings. TUN interfaces can't be bridged with Ethernet,
+  so MKConnect acts as a router instead: Linux uses sing-box `auto_redirect` + IP forwarding, macOS IP forwarding,
+  Windows Internet Connection Sharing (devices get 192.168.137.x automatically). Everything is undone on disconnect.
+  `scripts/test-gateway-linux.sh` checks it end to end with network namespaces.
 - SSH host keys are pinned on first connect (trust on first use), and a changed key is refused
 - Profiles are stored in `<user config dir>/mkconnect/profiles.json` with owner-only permissions
 
@@ -74,6 +79,8 @@ mkconnect settings set core external
 mkconnect
 mkconnect run germany --mode tun
 sudo mkconnect run germany --mode tun --lan
+mkconnect interfaces                                # interfaces that can share the tunnel
+sudo mkconnect run germany --mode tun --share eth1  # gateway for devices on eth1
 ```
 
 ## Build
@@ -93,6 +100,8 @@ Local packages into `dist/` (both scripts also run offline once their dependenci
 ```sh
 scripts/build-macos.sh v2.0.0      # universal MKConnect.app + CLI (needs Xcode command line tools)
 scripts/build-android.sh v2.0.0    # APKs for arm64/armv7/x86_64/x86 via fyne-cross (needs Docker)
+scripts/build-windows.sh v2.0.0    # Windows amd64/x86/arm64, cross-compiled with zig (ZIG=/path/to/zig)
+scripts/build-linux.sh v2.0.0      # Linux amd64/x86/arm64/armv7 in Debian containers (needs Docker)
 ```
 
 Add `-tags no_xray` or `-tags no_singbox` to leave a core out and get a smaller binary. TUN mode needs the sing-box core.
@@ -112,5 +121,5 @@ a system-wide VPN (TUN) on Android needs a VPN service and is on the roadmap.
 
 ## Roadmap
 
-- Gateway mode (share the TUN with other devices) and hotspot helpers
+- Hotspot helpers
 - Android app with a background VPN service

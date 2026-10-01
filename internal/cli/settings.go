@@ -3,6 +3,7 @@ package cli
 import (
 	"fmt"
 	"strconv"
+	"strings"
 
 	"github.com/spf13/cobra"
 
@@ -29,6 +30,10 @@ var settingKeys = map[string]func(s *profile.Settings, v string) error{
 	"proxy-pass": func(s *profile.Settings, v string) error { s.ProxyPass = v; return nil },
 	"remote-dns": func(s *profile.Settings, v string) error { s.RemoteDNS = v; return nil },
 	"log-level":  func(s *profile.Settings, v string) error { s.LogLevel = v; return nil },
+	"share": func(s *profile.Settings, v string) error {
+		s.ShareInterfaces = splitComma(v)
+		return nil
+	},
 }
 
 func newSettingsCmd() *cobra.Command {
@@ -53,12 +58,13 @@ func newSettingsCmd() *cobra.Command {
 			fmt.Printf("proxy-pass:    %s\n", mask(s.ProxyPass))
 			fmt.Printf("remote-dns:    %s\n", s.RemoteDNS)
 			fmt.Printf("log-level:     %s\n", s.LogLevel)
+			fmt.Printf("share:         %s\n", strings.Join(s.ShareInterfaces, ","))
 			return nil
 		},
 	}
 	set := &cobra.Command{
 		Use:   "set <key> <value>",
-		Short: "Change a setting (core, mode, external-path, external-kind, port, lan, proxy-user, proxy-pass, remote-dns, log-level)",
+		Short: "Change a setting (core, mode, external-path, external-kind, port, lan, proxy-user, proxy-pass, remote-dns, log-level, share)",
 		Example: `  mkconnect settings set core xray
   mkconnect settings set mode tun
   mkconnect settings set lan true

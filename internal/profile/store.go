@@ -42,6 +42,10 @@ type Settings struct {
 	RemoteDNS string `json:"remote_dns,omitempty"`
 	LogLevel  string `json:"log_level,omitempty"`
 
+	// ShareInterfaces are network interfaces whose devices are routed through
+	// the tunnel (gateway mode). Only used in TUN mode.
+	ShareInterfaces []string `json:"share_interfaces,omitempty"`
+
 	// ClipboardImport makes the desktop app add share links found on the clipboard.
 	ClipboardImport bool `json:"clipboard_import"`
 }

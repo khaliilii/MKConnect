@@ -286,3 +286,11 @@ func TestImportClipboardButton(t *testing.T) {
 		t.Fatal("empty clipboard changed the list")
 	}
 }
+
+func TestTUNShareInterfacesUI(t *testing.T) {
+	u := newTestUI(t)
+	u.store.Settings.Mode = profile.ModeTUN
+	u.win.SetContent(nil)
+	u.build() // rebuild with TUN selected so the share section is visible
+	screenshot(t, u.win, "tun-share")
+}

@@ -16,8 +16,9 @@ go_version=$(go env GOVERSION)
 case "$(uname)" in Darwin) cache=$HOME/Library/Caches/fyne-cross ;; *) cache=${XDG_CACHE_HOME:-$HOME/.cache}/fyne-cross ;; esac
 
 # The container runs linux/amd64; give it this Go so it doesn't download one mid-build.
-GOTOOLCHAIN=local GOFLAGS=-modcacherw GOMODCACHE="$cache/pkg/mod" \
-	go mod download "golang.org/toolchain@v0.0.1-$go_version.linux-amd64" || true
+# Run outside the module: the bootstrap Go may be older than go.mod requires.
+(cd / && GOTOOLCHAIN=local GOFLAGS=-modcacherw GOMODCACHE="$cache/pkg/mod" \
+	go mod download "golang.org/toolchain@v0.0.1-$go_version.linux-amd64")
 
 go mod vendor
 trap 'rm -rf vendor' EXIT

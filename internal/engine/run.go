@@ -7,6 +7,7 @@ import (
 	"log"
 	"net"
 
+	"github.com/khaliilii/MKConnect/internal/gateway"
 	"github.com/khaliilii/MKConnect/internal/profile"
 )
 
@@ -43,6 +44,11 @@ func Run(ctx context.Context, p profile.Profile, s profile.Settings, hooks Hooks
 		}
 	}
 
+	share := s.Mode == profile.ModeTUN && len(s.ShareInterfaces) > 0
+	if len(s.ShareInterfaces) > 0 && !share {
+		log.Printf("⚠️  sharing with %v needs TUN mode; ignored in proxy mode", s.ShareInterfaces)
+	}
+
 	shown := p // start may pin the server to an IP; show what the user configured
 	engines, err := start(ctx, &p, &s)
 	defer func() {
@@ -54,6 +60,22 @@ func Run(ctx context.Context, p profile.Profile, s profile.Settings, hooks Hooks
 	}()
 	if err != nil {
 		return err
+	}
+
+	if share {
+		gw, err := gateway.Enable(s.ShareInterfaces, TUNName)
+		if err != nil {
+			return fmt.Errorf("share tunnel: %w", err)
+		}
+		defer func() {
+			if err := gw.Stop(); err != nil {
+				log.Printf("⚠️  %v", err)
+			}
+		}()
+		log.Printf("🔀 sharing the tunnel with %v", s.ShareInterfaces)
+		if h := gateway.Hint(s.ShareInterfaces); h != "" {
+			log.Printf("   %s", h)
+		}
 	}
 
 	session := newSession(&shown, &s, engines[0])
@@ -89,7 +111,7 @@ func start(ctx context.Context, p *profile.Profile, s *profile.Settings) ([]Engi
 	if s.Core == profile.CoreSingBox || (s.Core == profile.CoreExternal && s.ExternalKind == profile.CoreSingBox) {
 		var tunOpts *tunOptions
 		if tun {
-			tunOpts = &tunOptions{}
+			tunOpts = &tunOptions{Gateway: len(s.ShareInterfaces) > 0}
 		}
 		cfg, err := singBoxConfig(p, s, tunOpts)
 		if err != nil {
@@ -141,7 +163,7 @@ func start(ctx context.Context, p *profile.Profile, s *profile.Settings) ([]Engi
 		return engines, nil
 	}
 
-	cfg := singBoxTUNConfig(s, s.ListenPort, &tunOptions{ExcludeAddrs: exclude})
+	cfg := singBoxTUNConfig(s, s.ListenPort, &tunOptions{ExcludeAddrs: exclude, Gateway: len(s.ShareInterfaces) > 0})
 	data, err := marshal(cfg)
 	if err != nil {
 		return engines, err

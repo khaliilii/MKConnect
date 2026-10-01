@@ -6,6 +6,7 @@ require (
 	fyne.io/fyne/v2 v2.8.1
 	github.com/armon/go-socks5 v0.0.0-20160902184237-e75332964ef5
 	github.com/common-nighthawk/go-figure v0.0.0-20210622060536-734e95fb86be
+	github.com/miekg/dns v1.1.72
 	github.com/sagernet/sing v0.9.6-0.20260922013354-87c33f17688f
 	github.com/sagernet/sing-box v1.14.2
 	github.com/sagernet/sing-tun v0.9.6-0.20260924001923-ddaa4ca25e3b
@@ -79,7 +80,6 @@ require (
 	github.com/mdlayher/socket v0.6.0 // indirect
 	github.com/metacubex/utls v1.8.7 // indirect
 	github.com/mholt/acmez/v3 v3.1.6 // indirect
-	github.com/miekg/dns v1.1.72 // indirect
 	github.com/nfnt/resize v0.0.0-20180221191011-83c6a9932646 // indirect
 	github.com/nicksnyder/go-i18n/v2 v2.5.1 // indirect
 	github.com/pelletier/go-toml v1.9.5 // indirect

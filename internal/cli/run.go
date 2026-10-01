@@ -19,6 +19,7 @@ func availableCores() []string { return engine.Available() }
 func newRunCmd() *cobra.Command {
 	var (
 		core, mode, proxyUser, proxyPass string
+		shareIfaces                      []string
 		port                             int
 		lan                              bool
 	)
@@ -62,6 +63,9 @@ func newRunCmd() *cobra.Command {
 			if f.Changed("proxy-pass") {
 				s.ProxyPass = proxyPass
 			}
+			if f.Changed("share") {
+				s.ShareInterfaces = shareIfaces
+			}
 
 			figure.NewFigure("MKConnect", "small", true).Print()
 
@@ -90,5 +94,6 @@ func newRunCmd() *cobra.Command {
 	f.BoolVar(&lan, "lan", false, "share the proxy with other devices on the network")
 	f.StringVar(&proxyUser, "proxy-user", "", "username required to use the local proxy")
 	f.StringVar(&proxyPass, "proxy-pass", "", "password required to use the local proxy")
+	f.StringSliceVar(&shareIfaces, "share", nil, "TUN mode: route devices on these network interfaces through the tunnel (gateway), e.g. --share eth1,wlan1")
 	return cmd
 }

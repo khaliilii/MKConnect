@@ -85,6 +85,13 @@ go build -trimpath -tags with_gvisor,with_quic,with_utls -ldflags "-s -w" .
 go build -trimpath -tags with_gvisor,with_quic,with_utls -ldflags "-s -w" ./cmd/mkconnect-gui
 ```
 
+Local packages into `dist/` (both scripts also run offline once their dependencies are cached):
+
+```sh
+scripts/build-macos.sh v2.0.0      # universal MKConnect.app + CLI (needs Xcode command line tools)
+scripts/build-android.sh v2.0.0    # APKs for arm64/armv7/x86_64/x86 via fyne-cross (needs Docker)
+```
+
 Add `-tags no_xray` or `-tags no_singbox` to leave a core out and get a smaller binary. TUN mode needs the sing-box core.
 
 GitHub Actions builds these on every push and attaches them to a release for `v*.*.*` tags:

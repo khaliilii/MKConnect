@@ -307,3 +307,5 @@ jobs:
             dist/MKConnect-*
             dist/SHA256SUMS
           generate_release_notes: true
+          # v1.2.3-beta.1 and similar are marked as pre-releases
+          prerelease: ${{ contains(github.ref_name, '-') }}

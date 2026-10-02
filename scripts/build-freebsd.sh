@@ -35,7 +35,9 @@ for a in $gui_arches; do
 	echo "building freebsd/$a GUI..."
 	# fyne-cross forwards the host GOFLAGS into the container, which would
 	# override the vendor/ directory; build from vendor with no network.
-	env -u GOFLAGS "$fyne_cross" freebsd -arch="$a" -tags "$tags" \
+	# x11: go-gl/glfw only compiles X11 on the BSDs by default but still references
+	# its Wayland helpers unless the x11 tag picks the X11-only code paths.
+	env -u GOFLAGS "$fyne_cross" freebsd -arch="$a" -tags "$tags,x11" \
 		-env GOTOOLCHAIN="$go_version" -env GOPROXY=off \
 		-app-id com.khaliilii.mkconnect -name MKConnect -app-version "$app_version" \
 		-icon cmd/mkconnect-gui/Icon.png ./cmd/mkconnect-gui

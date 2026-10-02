@@ -20,12 +20,22 @@ type Session struct {
 	Inbounds []string // where local traffic enters
 	Outbound string   // the server it leaves through
 
-	counter trafficCounter
+	counter   trafficCounter
+	trafficFn func() (up, down int64, ok bool)
+}
+
+// NewSession describes a connection run elsewhere (e.g. by an elevated helper
+// process); traffic reports its byte counters.
+func NewSession(core string, inbounds []string, outbound string, traffic func() (up, down int64, ok bool)) *Session {
+	return &Session{Core: core, Inbounds: inbounds, Outbound: outbound, trafficFn: traffic}
 }
 
 // Traffic returns bytes sent and received through the server so far. ok is
 // false when the core can't report it (external binaries).
 func (s *Session) Traffic() (up, down int64, ok bool) {
+	if s.trafficFn != nil {
+		return s.trafficFn()
+	}
 	if s.counter == nil {
 		return 0, 0, false
 	}

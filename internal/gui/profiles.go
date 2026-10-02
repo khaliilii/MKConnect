@@ -67,7 +67,7 @@ func (u *ui) newProfilesPanel() fyne.CanvasObject {
 	}
 
 	var addBtn *widget.Button
-	addBtn = widget.NewButtonWithIcon("Add", theme.ContentAddIcon(), func() {
+	addBtn = widget.NewButtonWithIcon(wide("Add"), theme.ContentAddIcon(), func() {
 		var items []*fyne.MenuItem
 		for _, t := range profile.Types {
 			items = append(items, fyne.NewMenuItem(typeLabels[t], func() {
@@ -85,8 +85,8 @@ func (u *ui) newProfilesPanel() fyne.CanvasObject {
 	})
 	addBtn.Importance = widget.HighImportance
 
-	clipBtn := widget.NewButtonWithIcon("Clipboard", theme.ContentPasteIcon(), u.importClipboard)
-	importBtn := widget.NewButtonWithIcon("Import", theme.DownloadIcon(), u.showImport)
+	clipBtn := widget.NewButtonWithIcon(wide("Clipboard"), theme.ContentPasteIcon(), u.importClipboard)
+	importBtn := widget.NewButtonWithIcon(wide("Import"), theme.DownloadIcon(), u.showImport)
 	editBtn := widget.NewButtonWithIcon("", theme.DocumentCreateIcon(), func() {
 		if p := u.activeProfile(); p != nil {
 			u.openEditor(*p, false)
@@ -100,7 +100,7 @@ func (u *ui) newProfilesPanel() fyne.CanvasObject {
 		}
 	})
 	deleteBtn := widget.NewButtonWithIcon("", theme.DeleteIcon(), u.confirmDelete)
-	aboutBtn := widget.NewButtonWithIcon("About", theme.InfoIcon(), u.showAbout)
+	aboutBtn := widget.NewButtonWithIcon(wide("About"), theme.InfoIcon(), u.showAbout)
 
 	toolbar := container.NewBorder(nil, nil, container.NewHBox(addBtn, clipBtn, importBtn), container.NewHBox(editBtn, copyBtn, deleteBtn))
 	title := container.NewBorder(nil, nil, widget.NewLabelWithStyle("Accounts", fyne.TextAlignLeading, fyne.TextStyle{Bold: true}), aboutBtn)
@@ -126,6 +126,15 @@ func (u *ui) newProfilesPanel() fyne.CanvasObject {
 	u.profilesPanel = container.NewBorder(top, nil, nil, nil, container.NewStack(u.emptyHint, u.list))
 	u.refreshProfiles()
 	return u.profilesPanel
+}
+
+// wide returns a button label on desktop and none on phones, where the toolbar
+// only has room for icons.
+func wide(label string) string {
+	if isMobile {
+		return ""
+	}
+	return label
 }
 
 func profileSummary(p *profile.Profile) string {
@@ -438,7 +447,7 @@ func (u *ui) showImport() {
 	}
 	content := container.NewBorder(group, container.NewHBox(paste, layout.NewSpacer(), importBtn), nil, nil, input)
 	d = dialog.NewCustom("Import accounts", "Cancel", content, u.win)
-	d.Resize(fyne.NewSize(640, 400))
+	u.fitDialog(d, 640, 400)
 	d.Show()
 }
 

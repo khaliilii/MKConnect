@@ -37,7 +37,12 @@ A multi-account client for **SSH, VMess, VLESS, Trojan, Shadowsocks, Hysteria2 a
 - live connection info: inbound, outbound, core, upload / download speed and totals
 - live logs, a tray icon that keeps the connection running when the window is closed, and an About page
 
-For TUN mode start the app with administrator rights (`sudo` on Linux/macOS, "Run as administrator" on Windows).
+TUN mode (and gateway sharing) need administrator rights to create the virtual interface. The app itself runs
+as a normal user: when you connect in TUN mode it asks the system for permission (the macOS password dialog,
+the Windows UAC prompt or polkit on Linux) and runs only the tunnel in a small elevated helper, which stops
+when you disconnect or quit the app.
+
+On phones the app uses a phone layout (Accounts / Connection / Logs tabs, Connect always at the bottom).
 The macOS app is not notarized; after unzipping run `xattr -dr com.apple.quarantine MKConnect.app` once.
 
 The desktop app and the CLI share the same profiles file. Set `MKCONNECT_CONFIG` to use a different one.

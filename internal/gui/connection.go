@@ -16,6 +16,7 @@ import (
 	"fyne.io/fyne/v2/theme"
 	"fyne.io/fyne/v2/widget"
 
+	"github.com/khaliilii/MKConnect/internal/elevate"
 	"github.com/khaliilii/MKConnect/internal/engine"
 	"github.com/khaliilii/MKConnect/internal/gateway"
 	"github.com/khaliilii/MKConnect/internal/profile"
@@ -61,7 +62,7 @@ func (u *ui) newConnectionPanel() fyne.CanvasObject {
 	mode.SetSelected(labelFor(modeValues, modeLabels, s.Mode))
 	tunWarning := widget.NewLabel(tunPrivilegeHint())
 	tunWarning.Wrapping = fyne.TextWrapWord
-	tunWarning.Importance = widget.WarningImportance
+	tunWarning.Importance = widget.LowImportance
 
 	// Gateway mode: route devices on other network interfaces through the tunnel.
 	shareNames := map[string]string{} // check label -> interface name
@@ -170,9 +171,11 @@ func (u *ui) newConnectionPanel() fyne.CanvasObject {
 	u.connectBtn = widget.NewButtonWithIcon("Connect", theme.MediaPlayIcon(), u.toggleConnection)
 	u.connectBtn.Importance = widget.HighImportance
 
+	// The status and Connect button are placed by build(): under the settings on
+	// desktop, under the account list on mobile.
+	u.connectFooter = container.NewVBox(u.statusLabel, u.connectBtn)
 	header := widget.NewLabelWithStyle("Connection", fyne.TextAlignLeading, fyne.TextStyle{Bold: true})
-	footer := container.NewVBox(u.statusLabel, u.connectBtn)
-	return container.NewBorder(header, footer, nil, nil, container.NewVScroll(settings))
+	return container.NewBorder(header, nil, nil, nil, container.NewVScroll(settings))
 }
 
 func (u *ui) toggleConnection() {
@@ -198,8 +201,16 @@ func (u *ui) connect() {
 	u.cancel, u.done = cancel, done
 	u.setState(stateConnecting, pc.Name)
 
+	// TUN mode creates network interfaces, which needs root/Administrator. Rather
+	// than asking users to start the app elevated, run the core in a helper
+	// that the system's own permission prompt starts.
+	run := engine.Run
+	if s.Mode == profile.ModeTUN && !isElevated() && !isMobile {
+		run = elevate.Run
+	}
+
 	go func() {
-		err := engine.Run(ctx, pc, s, engine.Hooks{
+		err := run(ctx, pc, s, engine.Hooks{
 			OnHostKey: func(key string) {
 				fyne.Do(func() {
 					if saved, err := u.store.Find(id); err == nil {
@@ -388,10 +399,13 @@ func (u *ui) newSessionBox(relayout func()) fyne.CanvasObject {
 }
 
 func tunPrivilegeHint() string {
-	if runtime.GOOS == "windows" {
-		return "TUN mode needs administrator rights: right-click MKConnect and choose \"Run as administrator\"."
+	switch runtime.GOOS {
+	case "windows":
+		return "TUN mode needs administrator rights: Windows will ask for permission when you connect."
+	case "darwin":
+		return "TUN mode needs administrator rights: macOS will ask for your password when you connect."
 	}
-	return "TUN mode needs root: start MKConnect with sudo."
+	return "TUN mode needs root: the system will ask for your password when you connect."
 }
 
 func shareHintText(shared []string) string {

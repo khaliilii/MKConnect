@@ -15,6 +15,7 @@ import (
 	"fyne.io/fyne/v2/container"
 	"fyne.io/fyne/v2/dialog"
 	"fyne.io/fyne/v2/driver/desktop"
+	"fyne.io/fyne/v2/theme"
 	"fyne.io/fyne/v2/widget"
 
 	"github.com/khaliilii/MKConnect/internal/engine"
@@ -59,11 +60,13 @@ type ui struct {
 	cancel context.CancelFunc
 	done   chan struct{}
 
-	connectBtn  *widget.Button
-	statusLabel *widget.Label
-	settingsBox *fyne.Container
-	trayMenu    *fyne.Menu
-	trayConnect *fyne.MenuItem
+	connectBtn    *widget.Button
+	statusLabel   *widget.Label
+	connectFooter *fyne.Container // status + Connect button
+	mobileTabs    *container.AppTabs
+	settingsBox   *fyne.Container
+	trayMenu      *fyne.Menu
+	trayConnect   *fyne.MenuItem
 }
 
 // Run starts the GUI and blocks until the app quits.
@@ -110,8 +113,9 @@ func Run(icon []byte) {
 	u.win.ShowAndRun()
 }
 
-// isMobile is true on Android/iOS, where there is no TUN (without a VPN service) and no tray.
-const isMobile = runtime.GOOS == "android" || runtime.GOOS == "ios"
+// isMobile is true on Android/iOS: phone layout, no TUN (without a VPN service), no tray.
+// It's a variable so tests can render the phone layout.
+var isMobile = runtime.GOOS == "android" || runtime.GOOS == "ios"
 
 // profilesPath is $MKCONNECT_CONFIG, the user config dir on desktop, or the
 // app's private storage on mobile (which has no home directory).
@@ -122,18 +126,51 @@ func profilesPath(a fyne.App) (string, error) {
 	return filepath.Join(a.Storage().RootURI().Path(), "profiles.json"), nil
 }
 
-// build lays out the main window.
+// build lays out the main window: side by side on desktop, tabs on phones.
 func (u *ui) build() {
-	left := u.newProfilesPanel()
-	var logPane *fyne.Container
-	session := u.newSessionBox(func() { logPane.Refresh() })
-	logPane = container.NewBorder(container.NewVBox(session, widget.NewSeparator()), nil, nil, nil, u.newLogView())
-	right := container.NewVSplit(u.newConnectionPanel(), logPane)
+	profiles := u.newProfilesPanel()
+	conn := u.newConnectionPanel()
+	logs := u.newLogView()
+	var sessionParent *fyne.Container
+	session := u.newSessionBox(func() {
+		if sessionParent != nil {
+			sessionParent.Refresh()
+		}
+	})
+	u.win.SetMainMenu(u.mainMenu())
+
+	if isMobile {
+		// Accounts with the Connect button always at hand, like v2rayNG.
+		accounts := container.NewBorder(nil, container.NewVBox(widget.NewSeparator(), u.connectFooter), nil, nil, profiles)
+		sessionParent = container.NewBorder(container.NewVBox(session, widget.NewSeparator()), nil, nil, nil, conn)
+		u.mobileTabs = container.NewAppTabs(
+			container.NewTabItemWithIcon("Accounts", theme.ListIcon(), container.NewPadded(accounts)),
+			container.NewTabItemWithIcon("Connection", theme.SettingsIcon(), container.NewPadded(sessionParent)),
+			container.NewTabItemWithIcon("Logs", theme.DocumentIcon(), container.NewPadded(logs)),
+		)
+		u.mobileTabs.SetTabLocation(container.TabLocationBottom)
+		u.win.SetContent(u.mobileTabs)
+		return
+	}
+
+	sessionParent = container.NewBorder(container.NewVBox(session, widget.NewSeparator()), nil, nil, nil, logs)
+	right := container.NewVSplit(container.NewBorder(nil, u.connectFooter, nil, nil, conn), sessionParent)
 	right.Offset = 0.62
-	split := container.NewHSplit(left, right)
+	split := container.NewHSplit(profiles, right)
 	split.Offset = 0.4
 	u.win.SetContent(split)
-	u.win.SetMainMenu(u.mainMenu())
+}
+
+// fitDialog sizes a dialog to w×h, or to the screen on phones.
+func (u *ui) fitDialog(d dialog.Dialog, w, h float32) {
+	c := u.win.Canvas().Size()
+	if isMobile || c.Width < w+32 {
+		w = c.Width - 16
+	}
+	if isMobile || c.Height < h+32 {
+		h = min(h, c.Height-16)
+	}
+	d.Resize(fyne.NewSize(w, h))
 }
 
 func (u *ui) mainMenu() *fyne.MainMenu {

@@ -8,6 +8,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strconv"
 	"strings"
 	"testing"
@@ -293,4 +294,29 @@ func TestTUNShareInterfacesUI(t *testing.T) {
 	u.win.SetContent(nil)
 	u.build() // rebuild with TUN selected so the share section is visible
 	screenshot(t, u.win, "tun-share")
+}
+
+// TestMobileLayout renders the phone layout at a typical phone size.
+func TestMobileLayout(t *testing.T) {
+	isMobile = true
+	defer func() { isMobile = runtime.GOOS == "android" || runtime.GOOS == "ios" }()
+	u := newTestUI(t)
+	u.win.Resize(fyne.NewSize(390, 800))
+	if u.mobileTabs == nil || len(u.mobileTabs.Items) != 3 {
+		t.Fatal("phone layout has no tabs")
+	}
+	for i, name := range []string{"accounts", "connection", "logs"} {
+		u.mobileTabs.SelectIndex(i)
+		screenshot(t, u.win, "mobile-"+name)
+	}
+	u.openEditor(u.store.Profiles[1], false)
+	for _, w := range u.app.Driver().AllWindows() {
+		if strings.HasPrefix(w.Title(), "Edit ") {
+			w.Resize(fyne.NewSize(390, 800))
+			screenshot(t, w, "mobile-editor")
+		}
+	}
+	u.mobileTabs.SelectIndex(0)
+	u.showImport()
+	screenshot(t, u.win, "mobile-import")
 }

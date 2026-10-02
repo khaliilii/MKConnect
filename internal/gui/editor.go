@@ -364,18 +364,33 @@ type rowForm struct {
 func (f *rowForm) build(items []*widget.FormItem) *fyne.Container {
 	objs := make([]fyne.CanvasObject, 0, 2*len(items))
 	for _, it := range items {
+		if isMobile {
+			// Phones are too narrow for a label column: put each label above its field.
+			if it.Text != "" {
+				l := widget.NewLabelWithStyle(it.Text, fyne.TextAlignLeading, fyne.TextStyle{Bold: true})
+				l.SizeName = theme.SizeNameCaptionText
+				f.labels[it.Widget] = l
+				objs = append(objs, l)
+			}
+			objs = append(objs, it.Widget)
+			continue
+		}
 		l := widget.NewLabelWithStyle(it.Text, fyne.TextAlignTrailing, fyne.TextStyle{Bold: true})
 		f.labels[it.Widget] = l
 		objs = append(objs, l, it.Widget)
+	}
+	if isMobile {
+		return container.NewVBox(objs...)
 	}
 	return container.New(layout.NewFormLayout(), objs...)
 }
 
 func (f *rowForm) setVisible(o fyne.CanvasObject, visible bool) {
-	for _, c := range []fyne.CanvasObject{o, f.labels[o]} {
-		if c == nil {
-			continue
-		}
+	objs := []fyne.CanvasObject{o}
+	if l, ok := f.labels[o]; ok && l != nil {
+		objs = append(objs, l)
+	}
+	for _, c := range objs {
 		if visible {
 			c.Show()
 		} else {

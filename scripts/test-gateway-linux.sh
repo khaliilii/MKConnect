@@ -32,8 +32,13 @@ docker run --rm --privileged --platform "linux/$host_arch" \
 	debian:bookworm-slim sh -eu -c '
 export PATH=/usr/local/go/bin:$PATH DEBIAN_FRONTEND=noninteractive
 # deb.debian.org is unreliable from some networks; use a fixed mirror (DEBIAN_MIRROR).
-sed -i "s#http://deb.debian.org#$MIRROR#g" /etc/apt/sources.list.d/debian.sources
-apt-get update -qq -o Acquire::Retries=8
+# Try the preferred mirror first, then others: some drop connections on some networks.
+cur=http://deb.debian.org
+for m in $MIRROR http://ftp.de.debian.org http://ftp.nl.debian.org http://deb.debian.org; do
+	sed -i "s#$cur#$m#g" /etc/apt/sources.list.d/debian.sources; cur=$m
+	apt-get update -qq -o Acquire::Retries=8 >/dev/null 2>&1 && break
+	echo "mirror $m unreachable, trying the next one"
+done
 for try in 1 2 3 4 5 6; do
 	apt-get install -y -qq -o Acquire::Retries=8 --no-install-recommends iproute2 curl nftables procps >/dev/null && break
 	[ $try = 6 ] && exit 1; sleep 5

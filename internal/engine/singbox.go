@@ -142,3 +142,27 @@ func singBoxContext(ctx context.Context) context.Context {
 	return box.Context(ctx, inbounds, outbounds, endpoint.NewRegistry(), dnsTransports,
 		sbservice.NewRegistry(), certificate.NewRegistry())
 }
+
+// StartSingBoxPlatform starts a sing-box config with a platform interface (the
+// Android VpnService opens the TUN and protects the core's sockets).
+func StartSingBoxPlatform(config []byte, platform adapter.PlatformInterface) (Engine, error) {
+	base := service.ContextWith[adapter.PlatformInterface](newSingBoxContext(), platform)
+	options, err := json.UnmarshalExtendedContext[option.Options](base, config)
+	if err != nil {
+		return nil, err
+	}
+	ctx, cancel := context.WithCancel(service.ExtendContext(base))
+	instance, err := box.New(box.Options{Context: ctx, Options: options})
+	if err != nil {
+		cancel()
+		return nil, err
+	}
+	traffic := &proxyTraffic{}
+	instance.Router().AppendTracker(traffic)
+	if err := instance.Start(); err != nil {
+		instance.Close()
+		cancel()
+		return nil, err
+	}
+	return &singBoxEngine{box: instance, cancel: cancel, traffic: traffic}, nil
+}

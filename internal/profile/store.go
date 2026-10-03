@@ -46,6 +46,9 @@ type Settings struct {
 	// the tunnel (gateway mode). Only used in TUN mode.
 	ShareInterfaces []string `json:"share_interfaces,omitempty"`
 
+	// PhoneMode is the Android app's mode: "vpn" (system-wide, default) or "proxy".
+	PhoneMode string `json:"phone_mode,omitempty"`
+
 	// ClipboardImport makes the desktop app add share links found on the clipboard.
 	ClipboardImport bool `json:"clipboard_import"`
 }

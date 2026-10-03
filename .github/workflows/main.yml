@@ -214,7 +214,7 @@ jobs:
           path: MKConnect-GUI-*
 
   # Targets without a native runner or C toolchain are cross-compiled in
-  # fyne-cross's Docker images (Linux 386/armv7, Android).
+  # fyne-cross's Docker images (Linux 386/armv7).
   gui-cross:
     needs: test
     runs-on: ubuntu-latest
@@ -229,10 +229,6 @@ jobs:
         include:
           - { os: linux, arch: "386" }
           - { os: linux, arch: arm }
-          - { os: android, arch: arm64 }
-          - { os: android, arch: arm }
-          - { os: android, arch: amd64 }
-          - { os: android, arch: "386" }
     steps:
       - uses: actions/checkout@v5
 
@@ -288,8 +284,72 @@ jobs:
           name: MKConnect-GUI-${{ matrix.os }}-${{ matrix.arch }}
           path: MKConnect-GUI-*
 
+  # Native Android app: Kotlin VpnService (system-wide VPN) + the Go core
+  # bound with gomobile. One APK per ABI plus a universal one.
+  android-app:
+    needs: test
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        shell: bash -o pipefail -e {0}
+    env:
+      BASH_ENV: .github/report.sh
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: "8.11.1"
+
+      - name: Version
+        run: |
+          v="${GITHUB_REF_NAME}"; appv="${GITHUB_REF_NAME#v}"; appv="${appv%%-*}"
+          if [ "${GITHUB_REF_TYPE}" != "tag" ]; then v="dev-${GITHUB_SHA::7}"; appv="0.0.${GITHUB_RUN_NUMBER}"; fi
+          echo "VERSION=$v" >> "$GITHUB_ENV"
+          echo "APP_VERSION=$appv" >> "$GITHUB_ENV"
+
+      - name: Build the Go core (.aar)
+        run: |
+          go install golang.org/x/mobile/cmd/gomobile@latest golang.org/x/mobile/cmd/gobind@latest
+          export ANDROID_NDK_HOME="$ANDROID_NDK_LATEST_HOME"
+          gomobile init
+          mkdir -p android/app/libs
+          gomobile bind -v -target=android -androidapi 21 \
+            -tags "$BUILD_TAGS" \
+            -ldflags "-s -w -X github.com/khaliilii/MKConnect/internal/version.Version=$VERSION" \
+            -o android/app/libs/mkmobile.aar ./mobile 2>&1 | tail -n 40 | tee bind.log || { report bind.log; exit 1; }
+          ls -lh android/app/libs
+
+      - name: Build the APKs
+        run: |
+          gradle -p android assembleRelease --no-daemon \
+            -PversionName="$APP_VERSION" -PversionCode="${GITHUB_RUN_NUMBER}" 2>&1 | tee gradle.log || { report gradle.log; exit 1; }
+          cd android/app/build/outputs/apk/release
+          for f in *.apk; do
+            abi=$(echo "$f" | sed -e 's/^app-//' -e 's/-release.apk$//')
+            case "$abi" in
+              arm64-v8a) name=arm64 ;; armeabi-v7a) name=armv7 ;; x86_64) name=amd64 ;; x86) name=386 ;; universal) name=universal ;; *) name=$abi ;;
+            esac
+            cp "$f" "$GITHUB_WORKSPACE/MKConnect-Android-$name.apk"
+          done
+          ls -lh "$GITHUB_WORKSPACE"/MKConnect-Android-*
+
+      - uses: actions/upload-artifact@v5
+        with:
+          name: MKConnect-Android
+          path: MKConnect-Android-*.apk
+
   release:
-    needs: [build, gui, gui-windows, gui-cross]
+    needs: [build, gui, gui-windows, gui-cross, android-app]
     runs-on: ubuntu-latest
     if: startsWith(github.ref, 'refs/tags/v')
     steps:

@@ -41,7 +41,13 @@ for arch in $arches; do
 		debian:bookworm-slim sh -eu -c '
 export PATH=/usr/local/go/bin:$PATH DEBIAN_FRONTEND=noninteractive
 # deb.debian.org is unreliable from some networks; use a fixed mirror (DEBIAN_MIRROR).
-sed -i "s#http://deb.debian.org#$MIRROR#g" /etc/apt/sources.list.d/debian.sources
+# Try the preferred mirror first, then others: some drop connections on some networks.
+cur=http://deb.debian.org
+for m in $MIRROR http://ftp.de.debian.org http://ftp.nl.debian.org http://deb.debian.org; do
+	sed -i "s#$cur#$m#g" /etc/apt/sources.list.d/debian.sources; cur=$m
+	apt-get update -qq -o Acquire::Retries=8 >/dev/null 2>&1 && break
+	echo "mirror $m unreachable, trying the next one"
+done
 native=$(dpkg --print-architecture)
 case $ARCH in
 amd64) triplet=x86_64-linux-gnu deb=amd64 cc=x86_64-linux-gnu-gcc ;;
@@ -56,7 +62,6 @@ if [ $deb = $native ]; then cc=gcc; else dpkg --add-architecture $deb; pkgs="$pk
 for p in libgl1-mesa-dev libx11-dev libxcursor-dev libxrandr-dev libxinerama-dev libxi-dev libxxf86vm-dev libxkbcommon-dev libwayland-dev; do
 	pkgs="$pkgs $p:$deb"
 done
-apt-get update -qq -o Acquire::Retries=8
 # The mirror sometimes drops connections mid-download; downloaded packages are
 # kept in the mounted apt cache, so each retry resumes where the last stopped.
 for try in 1 2 3 4 5 6; do

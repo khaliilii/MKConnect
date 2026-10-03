@@ -31,7 +31,7 @@ func NewRoot() *cobra.Command {
 	root.RunE = run.RunE
 	root.Flags().AddFlagSet(run.Flags())
 
-	root.AddCommand(run, newProfileCmd(), newSubCmd(), newSettingsCmd(), newCoresCmd(), newInterfacesCmd(), newCleanupCmd())
+	root.AddCommand(run, newProfileCmd(), newSubCmd(), newSettingsCmd(), newCoresCmd(), newTestCmd(), newInterfacesCmd(), newCleanupCmd())
 	return root
 }
 

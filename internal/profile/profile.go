@@ -59,6 +59,9 @@ type Profile struct {
 
 	Transport Transport `json:"transport,omitzero"`
 	TLS       TLS       `json:"tls,omitzero"`
+
+	// Test is the result of the last server test (nil = never tested).
+	Test *TestResult `json:"test,omitempty"`
 }
 
 // Transport is the V2Ray transport layer.

@@ -44,13 +44,34 @@ func (u *ui) newProfilesPanel() fyne.CanvasObject {
 			detail.SizeName = theme.SizeNameCaptionText
 			detail.Importance = widget.LowImportance
 			detail.Truncation = fyne.TextTruncateEllipsis
-			return container.New(layout.NewCustomPaddedVBoxLayout(-2*theme.Padding()), name, detail)
+			latency := widget.NewLabelWithStyle("", fyne.TextAlignTrailing, fyne.TextStyle{Bold: true})
+			extra := widget.NewLabel("")
+			extra.Alignment = fyne.TextAlignTrailing
+			extra.SizeName = theme.SizeNameCaptionText
+			extra.Importance = widget.LowImportance
+			vbox := func(objs ...fyne.CanvasObject) *fyne.Container {
+				return container.New(layout.NewCustomPaddedVBoxLayout(-2*theme.Padding()), objs...)
+			}
+			result := vbox(latency, extra)
+			return container.NewBorder(nil, nil, nil, result, vbox(name, detail))
 		},
 		func(id widget.ListItemID, o fyne.CanvasObject) {
 			p := &u.store.Profiles[u.visible[id]]
-			box := o.(*fyne.Container)
-			box.Objects[0].(*widget.Label).SetText(p.Name)
-			box.Objects[1].(*widget.Label).SetText(profileSummary(p))
+			row := o.(*fyne.Container)
+			left, right := row.Objects[0].(*fyne.Container), row.Objects[1].(*fyne.Container)
+			left.Objects[0].(*widget.Label).SetText(p.Name)
+			left.Objects[1].(*widget.Label).SetText(profileSummary(p))
+			main, extra, imp := testText(p.Test)
+			latency := right.Objects[0].(*widget.Label)
+			latency.Importance = imp
+			latency.SetText(main)
+			extraLabel := right.Objects[1].(*widget.Label)
+			// A long error is cut to the column width instead of squeezing the name.
+			extraLabel.Truncation = fyne.TextTruncateOff
+			if !p.Test.OK() {
+				extraLabel.Truncation = fyne.TextTruncateEllipsis
+			}
+			extraLabel.SetText(extra)
 		},
 	)
 	u.list.OnSelected = func(id widget.ListItemID) {
@@ -109,20 +130,29 @@ func (u *ui) newProfilesPanel() fyne.CanvasObject {
 		u.groupFilter = u.groupLabels[label]
 		u.refreshProfiles()
 	})
-	u.groupUpdateBtn = widget.NewButtonWithIcon("", theme.ViewRefreshIcon(), func() {
+	u.groupUpdateBtn = widget.NewButtonWithIcon(wide("Update"), theme.ViewRefreshIcon(), func() {
 		if g, err := u.store.FindGroup(u.groupFilter); err == nil {
 			u.updateSubscription(g.ID, true)
+			return
+		}
+		// "All accounts": refresh every subscription.
+		for _, g := range u.store.Groups {
+			if g.IsSubscription() {
+				u.updateSubscription(g.ID, true)
+			}
 		}
 	})
 	u.groupDeleteBtn = widget.NewButtonWithIcon("", theme.DeleteIcon(), u.confirmDeleteGroup)
+	testBtn, sortBtn, testBar := u.newTestControls()
 	groupBar := container.NewBorder(nil, nil, nil, container.NewHBox(u.groupUpdateBtn, u.groupDeleteBtn), u.groupSelect)
+	testRow := container.NewHBox(testBtn, sortBtn)
 
 	u.usageCard = u.newUsageCard()
 
 	u.emptyHint = widget.NewLabel("No accounts yet.\nUse Add or Import to create one.")
 	u.emptyHint.Alignment = fyne.TextAlignCenter
 
-	top := container.NewVBox(title, toolbar, groupBar, u.usageCard)
+	top := container.NewVBox(title, toolbar, groupBar, testRow, testBar, u.usageCard)
 	u.profilesPanel = container.NewBorder(top, nil, nil, nil, container.NewStack(u.emptyHint, u.list))
 	u.refreshProfiles()
 	return u.profilesPanel
@@ -209,6 +239,8 @@ func (u *ui) refreshProfiles() {
 			u.visible = append(u.visible, i)
 		}
 	}
+	profile.SortProfiles(u.store.Profiles, u.visible, u.store.Settings.SortBy)
+	u.sortBtn.SetText(u.sortButtonText())
 	u.list.Refresh()
 	u.list.UnselectAll()
 	for row, i := range u.visible {
@@ -222,7 +254,11 @@ func (u *ui) refreshProfiles() {
 	g, err := u.store.FindGroup(u.groupFilter)
 	isGroup := err == nil
 	setShown(u.groupDeleteBtn, isGroup)
-	setShown(u.groupUpdateBtn, isGroup && g.IsSubscription())
+	hasSubs := false
+	for _, g := range u.store.Groups {
+		hasSubs = hasSubs || g.IsSubscription()
+	}
+	setShown(u.groupUpdateBtn, (isGroup && g.IsSubscription()) || (u.groupFilter == filterAll && hasSubs))
 	u.updateUsageCard()
 	setShown(u.emptyHint, len(u.visible) == 0)
 	// Showing/hiding the usage card changes the header height; re-layout the panel.

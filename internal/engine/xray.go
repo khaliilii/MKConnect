@@ -4,6 +4,7 @@ package engine
 
 import (
 	"bytes"
+	"sync"
 
 	"github.com/xtls/xray-core/core"
 	"github.com/xtls/xray-core/features/stats"
@@ -15,12 +16,19 @@ func init() { startXray = newXray }
 
 type xrayEngine struct{ instance *core.Instance }
 
+// xrayInit serializes instance setup: core.New initializes process-wide
+// state (the system dialer), so server tests starting several instances at
+// once would race.
+var xrayInit sync.Mutex
+
 func newXray(config []byte) (Engine, error) {
 	cfg, err := serial.LoadJSONConfig(bytes.NewReader(config))
 	if err != nil {
 		return nil, err
 	}
+	xrayInit.Lock()
 	instance, err := core.New(cfg)
+	xrayInit.Unlock()
 	if err != nil {
 		return nil, err
 	}

@@ -153,7 +153,7 @@ func SubscriptionName(rawURL, title string) string {
 // re-imported or refreshed links can be matched to existing profiles.
 func (p *Profile) Fingerprint() string {
 	c := *p
-	c.ID, c.Name, c.Group, c.HostKey = "", "", "", ""
+	c.ID, c.Name, c.Group, c.HostKey, c.Test = "", "", "", "", nil
 	return c.Link() + "|" + c.Password + "|" + c.PrivateKeyPath
 }
 
@@ -275,7 +275,7 @@ func (s *Store) ApplySubscription(g *Group, data *SubscriptionData, now time.Tim
 		}
 		p.Group = g.ID
 		if prev, ok := takeMatch(existing, &p); ok {
-			p.ID, p.HostKey = prev.ID, prev.HostKey
+			p.ID, p.HostKey, p.Test = prev.ID, prev.HostKey, prev.Test
 		} else {
 			p.ID = NewID()
 		}

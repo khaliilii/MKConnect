@@ -6,6 +6,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 )
@@ -162,5 +163,33 @@ func TestFormatBytes(t *testing.T) {
 		if got := FormatBytes(n); got != want {
 			t.Errorf("%d: got %s want %s", n, got, want)
 		}
+	}
+}
+
+func TestSortProfiles(t *testing.T) {
+	ps := []Profile{
+		{Name: "untested"},
+		{Name: "failed", Test: &TestResult{Sent: 3}},
+		{Name: "slow", Test: &TestResult{Sent: 3, Received: 3, Latency: 400, Speed: 9 << 20}},
+		{Name: "fast-lossy", Test: &TestResult{Sent: 3, Received: 1, Latency: 250, Speed: 1 << 20}}, // counts as 250*5/3
+		{Name: "fast", Test: &TestResult{Sent: 3, Received: 3, Latency: 300, Speed: 2 << 20}},
+	}
+	order := func(by string) string {
+		idx := []int{0, 1, 2, 3, 4}
+		SortProfiles(ps, idx, by)
+		var names []string
+		for _, i := range idx {
+			names = append(names, ps[i].Name)
+		}
+		return strings.Join(names, ",")
+	}
+	if got := order(SortLatency); got != "fast,slow,fast-lossy,failed,untested" {
+		t.Fatalf("latency: %s", got)
+	}
+	if got := order(SortSpeed); got != "slow,fast,fast-lossy,failed,untested" {
+		t.Fatalf("speed: %s", got)
+	}
+	if got := order(""); got != "untested,failed,slow,fast-lossy,fast" {
+		t.Fatalf("unsorted: %s", got)
 	}
 }

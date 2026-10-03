@@ -53,6 +53,13 @@ type ui struct {
 	usageBar       *widget.ProgressBar
 	usageText      *widget.Label
 
+	testBtn      *widget.Button
+	sortBtn      *widget.Button
+	testBar      *fyne.Container
+	testProgress *widget.ProgressBar
+	testLabel    *widget.Label
+	testCancel   context.CancelFunc // non-nil while a server test runs
+
 	lastClipboard string
 	session       *engine.Session // nil while disconnected
 

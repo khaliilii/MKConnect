@@ -51,6 +51,9 @@ type Settings struct {
 
 	// ClipboardImport makes the desktop app add share links found on the clipboard.
 	ClipboardImport bool `json:"clipboard_import"`
+
+	// SortBy orders the account list: "" (as added), "latency" or "speed".
+	SortBy string `json:"sort_by,omitempty"`
 }
 
 // DefaultSettings returns the settings used for a fresh install.

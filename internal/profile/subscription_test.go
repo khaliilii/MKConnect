@@ -4,6 +4,7 @@ import (
 	"encoding/base64"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"path/filepath"
 	"testing"
 	"time"
@@ -89,6 +90,43 @@ func TestApplySubscriptionKeepsIDs(t *testing.T) {
 	s.RemoveGroup(gid)
 	if len(s.Profiles) != 1 || s.Active != "" || len(s.Groups) != 0 {
 		t.Fatalf("remove group left %d profiles, active=%q", len(s.Profiles), s.Active)
+	}
+}
+
+// Entries that differ only by name (same server and credentials) must keep
+// distinct ids across refreshes.
+func TestApplySubscriptionSameServerDistinctIDs(t *testing.T) {
+	s, _ := Load(filepath.Join(t.TempDir(), "p.json"))
+	g := s.AddGroup("sub", "https://example.com/sub")
+	body := &SubscriptionData{Body: "trojan://a@h.com:443#one\ntrojan://a@h.com:443#two\ntrojan://a@h.com:443#three\n"}
+	for round := 0; round < 2; round++ {
+		before := map[string]string{}
+		for _, p := range s.Profiles {
+			before[p.Name] = p.ID
+		}
+		s.ApplySubscription(g, body, time.Now())
+		seen := map[string]bool{}
+		for _, p := range s.Profiles {
+			if seen[p.ID] {
+				t.Fatalf("round %d: duplicate id %s", round, p.ID)
+			}
+			seen[p.ID] = true
+			if id, ok := before[p.Name]; ok && id != p.ID {
+				t.Fatalf("round %d: %s changed id %s -> %s", round, p.Name, id, p.ID)
+			}
+		}
+	}
+}
+
+func TestLoadRepairsDuplicateIDs(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "p.json")
+	os.WriteFile(path, []byte(`{"profiles":[{"id":"x","name":"a"},{"id":"x","name":"b"},{"name":"c"}]}`), 0o600)
+	s, err := Load(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if s.Profiles[0].ID != "x" || s.Profiles[1].ID == "x" || s.Profiles[1].ID == "" || s.Profiles[2].ID == "" {
+		t.Fatalf("ids not repaired: %+v", s.Profiles)
 	}
 }
 

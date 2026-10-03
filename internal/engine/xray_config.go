@@ -102,6 +102,13 @@ func xrayStream(p *profile.Profile) (obj, error) {
 	stream := obj{"network": network}
 	switch network {
 	case "tcp":
+		if t.HeaderType == "http" {
+			request := obj{"path": []string{orDefault(t.Path, "/")}}
+			if hosts := splitHosts(t.Host); len(hosts) > 0 {
+				request["headers"] = obj{"Host": hosts}
+			}
+			stream["tcpSettings"] = obj{"header": obj{"type": "http", "request": request}}
+		}
 	case "ws":
 		stream["wsSettings"] = obj{"path": t.Path, "host": t.Host}
 	case "grpc":

@@ -67,6 +67,9 @@ type Transport struct {
 	Path        string `json:"path,omitempty"`
 	Host        string `json:"host,omitempty"`
 	ServiceName string `json:"service_name,omitempty"` // gRPC
+	// HeaderType "http" disguises a plain tcp transport as HTTP/1.1
+	// (v2ray's tcp header obfuscation); Path and Host then go in the request.
+	HeaderType string `json:"header_type,omitempty"`
 }
 
 // TLS holds TLS / REALITY client settings.
@@ -138,6 +141,15 @@ func (p *Profile) Validate() error {
 	case "", "tcp", "ws", "grpc", "httpupgrade", "xhttp":
 	default:
 		return fmt.Errorf("unsupported transport %q", p.Transport.Network)
+	}
+	switch p.Transport.HeaderType {
+	case "":
+	case "http":
+		if p.Transport.Network != "" && p.Transport.Network != "tcp" {
+			return fmt.Errorf("the HTTP header only applies to the tcp transport")
+		}
+	default:
+		return fmt.Errorf("unsupported tcp header %q", p.Transport.HeaderType)
 	}
 	switch p.TLS.Mode {
 	case "", "tls":

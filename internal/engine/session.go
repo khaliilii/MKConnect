@@ -71,6 +71,8 @@ func newSession(p *profile.Profile, s *profile.Settings, primary Engine) *Sessio
 	out := []string{strings.ToUpper(p.Type[:1]) + p.Type[1:], p.Address()}
 	if p.Transport.Network != "" {
 		out = append(out, p.Transport.Network)
+	} else if p.Transport.HeaderType == "http" {
+		out = append(out, "tcp+http")
 	}
 	if p.TLS.Mode != "" {
 		out = append(out, p.TLS.Mode)

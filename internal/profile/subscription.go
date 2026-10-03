@@ -157,6 +157,25 @@ func (p *Profile) Fingerprint() string {
 	return c.Link() + "|" + c.Password + "|" + c.PrivateKeyPath
 }
 
+// takeMatch removes and returns the old profile that p replaces.
+func takeMatch(existing map[string][]Profile, p *Profile) (Profile, bool) {
+	fp := p.Fingerprint()
+	list := existing[fp]
+	if len(list) == 0 {
+		return Profile{}, false
+	}
+	i := 0
+	for j, o := range list {
+		if o.Name == p.Name {
+			i = j
+			break
+		}
+	}
+	match := list[i]
+	existing[fp] = append(list[:i:i], list[i+1:]...)
+	return match, true
+}
+
 // FindGroup returns the group with the given id or (case-insensitive) name.
 func (s *Store) FindGroup(ref string) (*Group, error) {
 	for i := range s.Groups {
@@ -234,11 +253,16 @@ func (s *Store) ApplySubscription(g *Group, data *SubscriptionData, now time.Tim
 		return 0, errs
 	}
 
-	existing := map[string]Profile{}
+	// Several entries can share a fingerprint (same server, different names),
+	// so each old profile is matched at most once: by fingerprint and name
+	// first, then by fingerprint alone.
+	existing := map[string][]Profile{}
+	var old []Profile
 	var kept []Profile
 	for _, p := range s.Profiles {
 		if p.Group == g.ID {
-			existing[p.Fingerprint()] = p
+			existing[p.Fingerprint()] = append(existing[p.Fingerprint()], p)
+			old = append(old, p)
 		} else {
 			kept = append(kept, p)
 		}
@@ -250,8 +274,8 @@ func (s *Store) ApplySubscription(g *Group, data *SubscriptionData, now time.Tim
 			continue
 		}
 		p.Group = g.ID
-		if old, ok := existing[p.Fingerprint()]; ok {
-			p.ID, p.HostKey = old.ID, old.HostKey
+		if prev, ok := takeMatch(existing, &p); ok {
+			p.ID, p.HostKey = prev.ID, prev.HostKey
 		} else {
 			p.ID = NewID()
 		}
@@ -260,8 +284,8 @@ func (s *Store) ApplySubscription(g *Group, data *SubscriptionData, now time.Tim
 		}
 		kept = append(kept, p)
 	}
-	for _, old := range existing {
-		if old.ID == s.Active && !activeStillThere {
+	for _, o := range old {
+		if o.ID == s.Active && !activeStillThere {
 			s.Active = ""
 		}
 	}

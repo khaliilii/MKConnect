@@ -96,6 +96,7 @@ func newProfileShowCmd() *cobra.Command {
 			printIf("path", p.Transport.Path)
 			printIf("host", p.Transport.Host)
 			printIf("service", p.Transport.ServiceName)
+			printIf("header", p.Transport.HeaderType)
 			printIf("tls", p.TLS.Mode)
 			printIf("sni", p.TLS.SNI)
 			printIf("alpn", strings.Join(p.TLS.ALPN, ","))
@@ -140,6 +141,7 @@ func (pf *profileFlags) register(f *pflag.FlagSet) {
 	f.StringVar(&p.Transport.Path, "path", "", "ws / httpupgrade / xhttp path")
 	f.StringVar(&p.Transport.Host, "host", "", "ws / httpupgrade / xhttp Host header")
 	f.StringVar(&p.Transport.ServiceName, "service-name", "", "gRPC service name")
+	f.StringVar(&p.Transport.HeaderType, "header-type", "", "tcp header obfuscation: http")
 	f.StringVar(&p.TLS.Mode, "tls", "", "security: none, tls, reality")
 	f.StringVar(&p.TLS.SNI, "sni", "", "TLS server name")
 	f.StringVar(&pf.alpn, "alpn", "", "comma-separated ALPN list")
@@ -178,6 +180,7 @@ func (pf *profileFlags) apply(f *pflag.FlagSet, dst *profile.Profile) error {
 	set("path", func() { dst.Transport.Path = src.Transport.Path })
 	set("host", func() { dst.Transport.Host = src.Transport.Host })
 	set("service-name", func() { dst.Transport.ServiceName = src.Transport.ServiceName })
+	set("header-type", func() { dst.Transport.HeaderType = src.Transport.HeaderType })
 	set("tls", func() {
 		dst.TLS.Mode = src.TLS.Mode
 		if dst.TLS.Mode == "none" {

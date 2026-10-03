@@ -24,42 +24,53 @@ func TestSingBoxClientAgainstXrayServer(t *testing.T) {
 		{"vless-grpc", obj{"network": "grpc", "grpcSettings": obj{"serviceName": "gun"}},
 			profile.Profile{Transport: profile.Transport{Network: "grpc", ServiceName: "gun"}}},
 		{"vless-tcp", obj{"network": "tcp"}, profile.Profile{}},
+		// tcp disguised as HTTP (headerType=http), common in 3x-ui panels.
+		{"vless-tcp-http", obj{"network": "tcp", "tcpSettings": obj{"header": obj{"type": "http",
+			"request": obj{"path": []string{"/"}, "headers": obj{"Host": []string{"dynu.com"}}}}}},
+			profile.Profile{Transport: profile.Transport{HeaderType: "http", Path: "/", Host: "dynu.com"}}},
 	}
 	target := newTarget(t)
 	url := strings.Replace(target.URL, "127.0.0.1", "localhost", 1)
 
 	for _, c := range cases {
-		t.Run(c.name, func(t *testing.T) {
-			port := freePort(t)
-			server, _ := marshal(obj{
-				"log": obj{"loglevel": "error"},
-				"inbounds": []obj{{
-					"listen": "127.0.0.1", "port": port, "protocol": "vless",
-					"settings":       obj{"clients": []obj{{"id": testUUID}}, "decryption": "none"},
-					"streamSettings": c.stream,
-				}},
-				"outbounds": []obj{{"protocol": "freedom"}},
-			})
-			srv, err := startXray(server)
-			if err != nil {
-				t.Fatalf("xray server: %v", err)
-			}
-			defer srv.Close()
+		cores := []string{profile.CoreSingBox}
+		if c.name == "vless-tcp-http" {
+			cores = append(cores, profile.CoreXray)
+		}
+		for _, core := range cores {
+			t.Run(c.name+"/"+core, func(t *testing.T) {
+				port := freePort(t)
+				server, _ := marshal(obj{
+					"log": obj{"loglevel": "error"},
+					"inbounds": []obj{{
+						"listen": "127.0.0.1", "port": port, "protocol": "vless",
+						"settings":       obj{"clients": []obj{{"id": testUUID}}, "decryption": "none"},
+						"streamSettings": c.stream,
+					}},
+					"outbounds": []obj{{"protocol": "freedom"}},
+				})
+				srv, err := startXray(server)
+				if err != nil {
+					t.Fatalf("xray server: %v", err)
+				}
+				defer srv.Close()
 
-			p := c.profile
-			p.Name, p.Type, p.Server, p.Port, p.UUID = c.name, profile.TypeVLESS, "127.0.0.1", port, testUUID
-			s := testSettings(t)
-			engines, err := start(t.Context(), &p, &s)
-			for _, e := range engines {
-				defer e.Close()
-			}
-			if err != nil {
-				t.Fatal(err)
-			}
-			waitListening(t, s.ListenPort)
-			if body := getThroughSOCKS(t, s.ListenPort, "", "", url); body != "hello through tunnel" {
-				t.Fatalf("unexpected body %q", body)
-			}
-		})
+				p := c.profile
+				p.Name, p.Type, p.Server, p.Port, p.UUID = c.name, profile.TypeVLESS, "127.0.0.1", port, testUUID
+				s := testSettings(t)
+				s.Core = core
+				engines, err := start(t.Context(), &p, &s)
+				for _, e := range engines {
+					defer e.Close()
+				}
+				if err != nil {
+					t.Fatal(err)
+				}
+				waitListening(t, s.ListenPort)
+				if body := getThroughSOCKS(t, s.ListenPort, "", "", url); body != "hello through tunnel" {
+					t.Fatalf("unexpected body %q", body)
+				}
+			})
+		}
 	}
 }

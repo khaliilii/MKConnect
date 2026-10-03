@@ -144,6 +144,9 @@ func parseVMess(link string) (Profile, error) {
 	if p.Transport.Network == "grpc" {
 		p.Transport.ServiceName, p.Transport.Path = v.Path, ""
 	}
+	if v.Type == "http" && p.Transport.Network == "" {
+		p.Transport.HeaderType = "http"
+	}
 	if v.TLS == "tls" || v.TLS == "reality" {
 		p.TLS = TLS{Mode: v.TLS, SNI: v.SNI, Fingerprint: v.FP, ALPN: splitList(v.ALPN)}
 	}
@@ -173,6 +176,9 @@ func parseURLLink(link string) (Profile, error) {
 		Path:        q.Get("path"),
 		Host:        q.Get("host"),
 		ServiceName: q.Get("serviceName"),
+	}
+	if q.Get("headerType") == "http" && p.Transport.Network == "" {
+		p.Transport.HeaderType = "http"
 	}
 	security := q.Get("security")
 	if security == "" && p.Type == TypeTrojan {
@@ -312,7 +318,7 @@ func (p *Profile) Link() string {
 	case TypeVMess:
 		v := vmessLink{
 			PS: p.Name, Add: p.Server, Port: flexInt(p.Port), ID: p.UUID, Aid: flexInt(p.AlterID),
-			Scy: p.Security, Net: p.Transport.Network, Host: p.Transport.Host, Path: p.Transport.Path,
+			Scy: p.Security, Net: p.Transport.Network, Type: p.Transport.HeaderType, Host: p.Transport.Host, Path: p.Transport.Path,
 			TLS: p.TLS.Mode, SNI: p.TLS.SNI, FP: p.TLS.Fingerprint, ALPN: strings.Join(p.TLS.ALPN, ","),
 		}
 		if v.Net == "grpc" {
@@ -334,6 +340,7 @@ func (p *Profile) Link() string {
 		setIf(q, "path", p.Transport.Path)
 		setIf(q, "host", p.Transport.Host)
 		setIf(q, "serviceName", p.Transport.ServiceName)
+		setIf(q, "headerType", p.Transport.HeaderType)
 		setIf(q, "security", p.TLS.Mode)
 		setIf(q, "sni", p.TLS.SNI)
 		setIf(q, "fp", p.TLS.Fingerprint)

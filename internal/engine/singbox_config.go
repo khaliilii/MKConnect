@@ -220,7 +220,16 @@ func singBoxOutbound(p *profile.Profile) (obj, error) {
 func singBoxTransport(t *profile.Transport) (obj, error) {
 	switch t.Network {
 	case "", "tcp":
-		return nil, nil
+		if t.HeaderType != "http" {
+			return nil, nil
+		}
+		// sing-box's http transport is plain HTTP/1.1 without TLS, which is
+		// what v2ray's tcp HTTP header obfuscation speaks.
+		h := obj{"type": "http", "method": "GET", "path": orDefault(t.Path, "/")}
+		if hosts := splitHosts(t.Host); len(hosts) > 0 {
+			h["host"] = hosts
+		}
+		return h, nil
 	case "ws":
 		ws := obj{"type": "ws"}
 		path, earlyData := splitEarlyData(t.Path)
@@ -247,6 +256,17 @@ func singBoxTransport(t *profile.Transport) (obj, error) {
 		return nil, fmt.Errorf("sing-box does not support the xhttp transport, use the xray core")
 	}
 	return nil, fmt.Errorf("sing-box: unsupported transport %q", t.Network)
+}
+
+// splitHosts splits a comma-separated host list.
+func splitHosts(s string) []string {
+	var hosts []string
+	for _, h := range strings.Split(s, ",") {
+		if h = strings.TrimSpace(h); h != "" {
+			hosts = append(hosts, h)
+		}
+	}
+	return hosts
 }
 
 // splitEarlyData turns the v2rayN "/path?ed=2048" convention into path + early data size.

@@ -165,6 +165,8 @@ func transportForm(p *profile.Profile, setVisible func(fyne.CanvasObject, bool))
 	path := entry(p.Transport.Path, "/path (ws, httpupgrade, xhttp)")
 	host := entry(p.Transport.Host, "Host header (ws, httpupgrade, xhttp)")
 	service := entry(p.Transport.ServiceName, "gRPC service name")
+	httpHeader := widget.NewCheck("HTTP header (disguise as HTTP)", nil)
+	httpHeader.SetChecked(p.Transport.HeaderType == "http")
 
 	security := selectOf(tlsModes, orDefault(p.TLS.Mode, "none"))
 	sni := entry(p.TLS.SNI, "server name (defaults to server)")
@@ -177,10 +179,13 @@ func transportForm(p *profile.Profile, setVisible func(fyne.CanvasObject, bool))
 
 	// Only show the rows that apply to the chosen transport and security.
 	updateTransport := func(n string) {
-		setVisible(path, n == "ws" || n == "httpupgrade" || n == "xhttp")
-		setVisible(host, n == "ws" || n == "httpupgrade" || n == "xhttp")
+		tcpHTTP := n == "tcp" && httpHeader.Checked
+		setVisible(httpHeader, n == "tcp")
+		setVisible(path, n == "ws" || n == "httpupgrade" || n == "xhttp" || tcpHTTP)
+		setVisible(host, n == "ws" || n == "httpupgrade" || n == "xhttp" || tcpHTTP)
 		setVisible(service, n == "grpc")
 	}
+	httpHeader.OnChanged = func(bool) { updateTransport(network.Selected) }
 	updateSecurity := func(m string) {
 		setVisible(sni, m != "none")
 		setVisible(fp, m != "none")
@@ -198,6 +203,7 @@ func transportForm(p *profile.Profile, setVisible func(fyne.CanvasObject, bool))
 
 	items := []*widget.FormItem{
 		{Text: "Transport", Widget: network},
+		{Text: "", Widget: httpHeader},
 		{Text: "Path", Widget: path},
 		{Text: "Host", Widget: host},
 		{Text: "Service name", Widget: service},
@@ -212,6 +218,10 @@ func transportForm(p *profile.Profile, setVisible func(fyne.CanvasObject, bool))
 	collect := func(p *profile.Profile) {
 		p.Transport = profile.Transport{}
 		switch n := network.Selected; n {
+		case "tcp":
+			if httpHeader.Checked {
+				p.Transport = profile.Transport{HeaderType: "http", Path: strings.TrimSpace(path.Text), Host: strings.TrimSpace(host.Text)}
+			}
 		case "ws", "httpupgrade", "xhttp":
 			p.Transport = profile.Transport{Network: n, Path: strings.TrimSpace(path.Text), Host: strings.TrimSpace(host.Text)}
 		case "grpc":

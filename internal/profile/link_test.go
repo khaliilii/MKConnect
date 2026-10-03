@@ -170,3 +170,24 @@ func TestExtractLinksBase64Subscription(t *testing.T) {
 		t.Fatalf("got %v", got)
 	}
 }
+
+func TestParseTCPHTTPHeader(t *testing.T) {
+	p, err := ParseLink("vless://id@h.com:8007?type=tcp&headerType=http&host=dynu.com&path=%2F&security=none#c3")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if p.Transport.Network != "" || p.Transport.HeaderType != "http" || p.Transport.Host != "dynu.com" || p.Transport.Path != "/" {
+		t.Fatalf("transport = %+v", p.Transport)
+	}
+	if q, err := ParseLink(p.Link()); err != nil || q.Transport != p.Transport {
+		t.Fatalf("round trip: %+v %v", q.Transport, err)
+	}
+	raw := `{"v":"2","ps":"vm","add":"h.com","port":"8001","id":"id","net":"tcp","type":"http","host":"dynu.com","path":"/x"}`
+	v, err := ParseLink("vmess://" + base64.StdEncoding.EncodeToString([]byte(raw)))
+	if err != nil || v.Transport.HeaderType != "http" || v.Transport.Path != "/x" {
+		t.Fatalf("vmess: %+v %v", v.Transport, err)
+	}
+	if w, _ := ParseLink(v.Link()); w.Transport != v.Transport {
+		t.Fatalf("vmess round trip: %+v", w.Transport)
+	}
+}

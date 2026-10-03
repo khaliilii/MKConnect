@@ -132,7 +132,21 @@ func Load(path string) (*Store, error) {
 	if err := json.Unmarshal(data, s); err != nil {
 		return nil, fmt.Errorf("parse %s: %w", path, err)
 	}
+	s.repairIDs()
 	return s, nil
+}
+
+// repairIDs gives every profile a unique id (older versions could reuse one
+// id for several subscription entries of the same server).
+func (s *Store) repairIDs() {
+	seen := map[string]bool{}
+	for i := range s.Profiles {
+		p := &s.Profiles[i]
+		for p.ID == "" || seen[p.ID] {
+			p.ID = NewID()
+		}
+		seen[p.ID] = true
+	}
 }
 
 // Save writes the store atomically with owner-only permissions, since it holds credentials.

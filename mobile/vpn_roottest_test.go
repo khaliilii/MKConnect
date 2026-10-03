@@ -51,7 +51,7 @@ func (f *fakeVpnService) OpenTun(cfg *TunConfig) (int32, error) {
 	}
 	run("link", "set", "mktun0", "mtu", "1500", "up")
 	for _, r := range strings.Split(cfg.Routes(), ",") {
-		run("route", "add", r, "dev", "mktun0")
+		run("route", "replace", r, "dev", "mktun0") // like Android: the VPN takes over the default route
 	}
 	f.t.Logf("VPN: addresses %s, %d routes, DNS %s, MTU %d", cfg.Addresses(), len(strings.Split(cfg.Routes(), ",")), cfg.DnsServer(), cfg.Mtu())
 	return int32(fd), nil

@@ -34,7 +34,7 @@ for m in $MIRROR http://ftp.de.debian.org http://ftp.nl.debian.org http://deb.de
 	echo "mirror $m unreachable, trying the next one"
 done
 for try in 1 2 3 4 5 6; do
-	apt-get install -y -qq -o Acquire::Retries=8 --no-install-recommends iproute2 >/dev/null && break
+	apt-get install -y -qq -o Acquire::Retries=8 --no-install-recommends iproute2 nftables >/dev/null && break
 	[ $try = 6 ] && exit 1; sleep 5
 done
 CGO_ENABLED=0 go build -buildvcs=false -o /tmp/ssserver ./internal/testtools/ssserver
@@ -47,6 +47,15 @@ ip -n remote addr add 203.0.113.10/32 dev lo
 ip -n remote addr add 1.1.1.1/32 dev lo
 ip route del default || true
 ip route add default via 10.200.0.2 dev wan0
+# The website and DNS only answer through the Shadowsocks server.
+ip netns exec remote nft -f - <<NFT
+table inet only_via_proxy {
+	chain input {
+		type filter hook input priority 0;
+		iifname "wan1" ip daddr { 203.0.113.10, 1.1.1.1 } drop
+	}
+}
+NFT
 ip netns exec remote /tmp/ssserver -ss 10.200.0.2:8388 -http 203.0.113.10:8080 -dns 1.1.1.1:53 >/tmp/ssserver.log 2>&1 &
 sleep 1
 # Without the VPN the site is unreachable (no route back from "the internet").

@@ -5,7 +5,7 @@ report() {
   local lines body
   lines=$(grep -v -e '^go: downloading' -e 'Pulling fs layer' -e 'Waiting$' -e 'Verifying Checksum' \
     -e 'Download complete' -e 'Pull complete' "$1" | cut -c1-300)
-  body=$( { echo "$lines" | grep -i -E 'error|undefined|cannot|failed|not found|fatal' | tail -n 25; \
+  body=$( { echo "$lines" | grep -E -i -e 'error|undefined|cannot|failed|not found|fatal' -e '^--- FAIL|_test.go:[0-9]+:' | tail -n 25; \
             echo '----- tail -----'; echo "$lines" | tail -n 15; } \
     | sed -e 's/%/%25/g' -e 's/\r/%0D/g' | sed ':a;N;$!ba;s/\n/%0A/g')
   echo "::error title=$1::${body}"

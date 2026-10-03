@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"os/exec"
 	"strings"
+
+	"github.com/khaliilii/MKConnect/internal/recovery"
 )
 
 // On macOS forwarded packets follow the TUN default routes into sing-box.
@@ -16,6 +18,7 @@ func enable(s *Session, _ []string, _ string) error {
 	if old == "1" {
 		return nil
 	}
+	recovery.Record(func(j *recovery.Journal) { j.MacForwarding = old })
 	if out, err := exec.Command("sysctl", "-w", "net.inet.ip.forwarding=1").CombinedOutput(); err != nil {
 		return fmt.Errorf("enable IP forwarding (needs root): %v: %s", err, strings.TrimSpace(string(out)))
 	}

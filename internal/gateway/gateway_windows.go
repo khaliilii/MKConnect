@@ -5,6 +5,8 @@ import (
 	"os/exec"
 	"strings"
 	"syscall"
+
+	"github.com/khaliilii/MKConnect/internal/recovery"
 )
 
 // On Windows, Internet Connection Sharing shares the TUN adapter (public side)
@@ -14,6 +16,7 @@ func enable(s *Session, shared []string, tunName string) error {
 	if len(shared) > 1 {
 		return fmt.Errorf("Windows Internet Connection Sharing can share with only one adapter at a time")
 	}
+	recovery.Record(func(j *recovery.Journal) { j.ICSPublic, j.ICSPrivate = tunName, shared[0] })
 	script := fmt.Sprintf(icsScript, psQuote(tunName), psQuote(shared[0]), "$true")
 	if err := powershell(script); err != nil {
 		return fmt.Errorf("enable Internet Connection Sharing (needs Administrator): %w", err)
@@ -22,6 +25,12 @@ func enable(s *Session, shared []string, tunName string) error {
 		return powershell(fmt.Sprintf(icsScript, psQuote(tunName), psQuote(shared[0]), "$false"))
 	})
 	return nil
+}
+
+func init() {
+	recovery.UndoICS = func(public, private string) error {
+		return powershell(fmt.Sprintf(icsScript, psQuote(public), psQuote(private), "$false"))
+	}
 }
 
 // icsScript enables (or disables) ICS from adapter {0} to adapter {1}.

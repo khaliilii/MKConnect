@@ -6,9 +6,11 @@ import (
 	"fmt"
 	"log"
 	"net"
+	"strings"
 
 	"github.com/khaliilii/MKConnect/internal/gateway"
 	"github.com/khaliilii/MKConnect/internal/profile"
+	"github.com/khaliilii/MKConnect/internal/recovery"
 )
 
 // Hooks lets the caller react to things discovered while connecting.
@@ -47,6 +49,21 @@ func Run(ctx context.Context, p profile.Profile, s profile.Settings, hooks Hooks
 	share := s.Mode == profile.ModeTUN && len(s.ShareInterfaces) > 0
 	if len(s.ShareInterfaces) > 0 && !share {
 		log.Printf("⚠️  sharing with %v needs TUN mode; ignored in proxy mode", s.ShareInterfaces)
+	}
+
+	if s.Mode == profile.ModeTUN {
+		// Undo whatever a crashed earlier connection left, then journal this one
+		// so a crash of this process can be undone too.
+		if cleaned, err := recovery.Recover(); err != nil {
+			log.Printf("⚠️  recovering from an earlier crash: %v", err)
+		} else if len(cleaned) > 0 {
+			log.Printf("🧹 cleaned up after an earlier crash: %s", strings.Join(cleaned, ", "))
+		}
+		end, err := recovery.Begin()
+		if err != nil {
+			log.Printf("⚠️  crash recovery unavailable: %v", err)
+		}
+		defer end() // runs last: after the cores and the gateway have restored everything
 	}
 
 	shown := p // start may pin the server to an IP; show what the user configured

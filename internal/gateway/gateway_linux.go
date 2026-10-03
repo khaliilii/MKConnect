@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"os"
 	"strings"
+
+	"github.com/khaliilii/MKConnect/internal/recovery"
 )
 
 const ipForward = "/proc/sys/net/ipv4/ip_forward"
@@ -22,6 +24,8 @@ func setSysctl(s *Session, path, value string) error {
 	if strings.TrimSpace(string(old)) == value {
 		return nil
 	}
+	// Journal the original value first, so a crash can still restore it.
+	recovery.Record(func(j *recovery.Journal) { j.IPForward = strings.TrimSpace(string(old)) })
 	if err := os.WriteFile(path, []byte(value), 0o644); err != nil {
 		return fmt.Errorf("enable IP forwarding (needs root): %w", err)
 	}

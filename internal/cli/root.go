@@ -10,6 +10,7 @@ import (
 
 	"github.com/khaliilii/MKConnect/internal/gateway"
 	"github.com/khaliilii/MKConnect/internal/profile"
+	"github.com/khaliilii/MKConnect/internal/recovery"
 	"github.com/khaliilii/MKConnect/internal/version"
 )
 
@@ -30,7 +31,7 @@ func NewRoot() *cobra.Command {
 	root.RunE = run.RunE
 	root.Flags().AddFlagSet(run.Flags())
 
-	root.AddCommand(run, newProfileCmd(), newSubCmd(), newSettingsCmd(), newCoresCmd(), newInterfacesCmd())
+	root.AddCommand(run, newProfileCmd(), newSubCmd(), newSettingsCmd(), newCoresCmd(), newInterfacesCmd(), newCleanupCmd())
 	return root
 }
 
@@ -81,6 +82,26 @@ func newInterfacesCmd() *cobra.Command {
 			}
 			for _, ifc := range ifaces {
 				fmt.Println(ifc)
+			}
+			return nil
+		},
+	}
+}
+
+func newCleanupCmd() *cobra.Command {
+	return &cobra.Command{
+		Use:   "cleanup",
+		Short: "Undo network changes left by a crashed TUN connection (run as root/Administrator)",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			cleaned, err := recovery.Recover()
+			for _, c := range cleaned {
+				fmt.Println("🧹 removed:", c)
+			}
+			if err != nil {
+				return err
+			}
+			if len(cleaned) == 0 {
+				fmt.Println("✅ nothing to clean up")
 			}
 			return nil
 		},

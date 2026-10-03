@@ -42,6 +42,12 @@ as a normal user: when you connect in TUN mode it asks the system for permission
 the Windows UAC prompt or polkit on Linux) and runs only the tunnel in a small elevated helper, which stops
 when you disconnect or quit the app.
 
+Disconnecting restores the network configuration exactly (interfaces, routes, policy rules, firewall,
+IP forwarding, DNS). If MKConnect is killed while connected, the next TUN connection undoes what it left
+behind, or run `sudo mkconnect cleanup`. `scripts/test-tun-linux.sh` checks all of this end to end: that
+the system's own traffic and DNS go through the tunnel, and that the configuration is identical before and
+after connecting, after gateway sharing and after a crash.
+
 On phones the app uses a phone layout (Accounts / Connection / Logs tabs, Connect always at the bottom).
 The macOS app is not notarized; after unzipping run `xattr -dr com.apple.quarantine MKConnect.app` once.
 

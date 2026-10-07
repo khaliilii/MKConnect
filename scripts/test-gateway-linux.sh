@@ -12,9 +12,11 @@ set -eu
 
 cd "$(dirname "$0")/.."
 host_arch=$(docker info --format '{{.Architecture}}' | sed -e 's/x86_64/amd64/' -e 's/aarch64/arm64/')
-go_version=$(go env GOVERSION)
+# LINUX_GO_VERSION picks another (e.g. already downloaded) toolchain, such as go1.26.8.
+go_version=${LINUX_GO_VERSION:-$(go env GOVERSION)}
 toolchain_cache=${FYNE_CROSS_CACHE:-$HOME/Library/Caches/fyne-cross}/pkg/mod
 (cd / && GOTOOLCHAIN=local GOFLAGS=-modcacherw GOMODCACHE="$toolchain_cache" \
+	GOPROXY="${GOPROXY:-https://proxy.golang.org|https://goproxy.io|https://goproxy.cn|direct}" \
 	go mod download "golang.org/toolchain@v0.0.1-$go_version.linux-$host_arch")
 goroot=$toolchain_cache/golang.org/toolchain@v0.0.1-$go_version.linux-$host_arch
 chmod +x "$goroot"/bin/* "$goroot"/pkg/tool/*/*

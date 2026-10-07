@@ -34,6 +34,12 @@ var settingKeys = map[string]func(s *profile.Settings, v string) error{
 		s.ShareInterfaces = splitComma(v)
 		return nil
 	},
+	"tun-stack": func(s *profile.Settings, v string) error { s.TUNStack = v; return nil },
+	"tun-mtu": func(s *profile.Settings, v string) error {
+		n, err := strconv.Atoi(v)
+		s.TUNMTU = n
+		return err
+	},
 }
 
 func newSettingsCmd() *cobra.Command {
@@ -59,12 +65,15 @@ func newSettingsCmd() *cobra.Command {
 			fmt.Printf("remote-dns:    %s\n", s.RemoteDNS)
 			fmt.Printf("log-level:     %s\n", s.LogLevel)
 			fmt.Printf("share:         %s\n", strings.Join(s.ShareInterfaces, ","))
+			if s.TUNStack != "" || s.TUNMTU > 0 {
+				fmt.Printf("tun-stack:     %s\ntun-mtu:       %d\n", s.TUNStack, s.TUNMTU)
+			}
 			return nil
 		},
 	}
 	set := &cobra.Command{
 		Use:   "set <key> <value>",
-		Short: "Change a setting (core, mode, external-path, external-kind, port, lan, proxy-user, proxy-pass, remote-dns, log-level, share)",
+		Short: "Change a setting (core, mode, external-path, external-kind, port, lan, proxy-user, proxy-pass, remote-dns, log-level, share, tun-stack, tun-mtu)",
 		Example: `  mkconnect settings set core xray
   mkconnect settings set mode tun
   mkconnect settings set lan true

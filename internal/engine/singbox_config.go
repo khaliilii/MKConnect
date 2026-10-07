@@ -37,6 +37,12 @@ type tunOptions struct {
 // (Windows needs a fixed name to set up Internet Connection Sharing).
 const TUNName = "MKConnect"
 
+// tunAddresses are the TUN interface's addresses. They are deliberately not
+// sing-box's defaults (172.19.0.1, fdfe:dcba:9876::1): other sing-box based
+// apps (Hiddify, nekoray, ...) use those, and when such an app's interface is
+// still around, routes "via 172.19.0.1" lead into it instead of into ours.
+func tunAddresses() []string { return []string{"172.19.77.1/30", "fd6d:6b63:6f6e::1/126"} }
+
 // singBoxConfig builds a complete sing-box config that exposes a mixed
 // (SOCKS5 + HTTP) proxy and, when tun is set, a TUN interface.
 func singBoxConfig(p *profile.Profile, s *profile.Settings, tun *tunOptions) (obj, error) {
@@ -87,12 +93,18 @@ func singBoxBase(s *profile.Settings, proxyOut obj, tun *tunOptions) obj {
 		t := obj{
 			"type":         "tun",
 			"tag":          "tun-in",
-			"address":      []string{"172.19.0.1/30", "fdfe:dcba:9876::1/126"},
+			"address":      tunAddresses(),
 			"auto_route":   true,
 			"strict_route": true,
 		}
 		if len(tun.ExcludeAddrs) > 0 {
 			t["route_exclude_address"] = tun.ExcludeAddrs
+		}
+		if s.TUNStack != "" {
+			t["stack"] = s.TUNStack
+		}
+		if s.TUNMTU > 0 {
+			t["mtu"] = s.TUNMTU
 		}
 		if runtime.GOOS == "windows" {
 			t["interface_name"] = TUNName

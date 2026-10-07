@@ -38,7 +38,7 @@ type TunConfig struct {
 // MTU of the interface.
 func (c *TunConfig) Mtu() int32 { return c.mtu }
 
-// Addresses returns the interface addresses ("172.19.0.1/30,...").
+// Addresses returns the interface addresses ("172.19.77.1/30,...").
 func (c *TunConfig) Addresses() string { return strings.Join(append(c.inet4, c.inet6...), ",") }
 
 // Routes returns the routes to add ("0.0.0.0/0,::/0" or split ranges).

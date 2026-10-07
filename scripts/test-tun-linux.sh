@@ -5,14 +5,18 @@
 #   2. after disconnecting, the network configuration is exactly as before
 #      (interfaces, addresses, routes, policy rules, nftables, ip_forward, DNS);
 #   3. the same with gateway sharing (--share);
-#   4. what a crash (kill -9) leaves behind, and that the next run cleans it up.
+#   4. what a crash (kill -9) leaves behind, and that the next run cleans it up;
+#   5. the same with automatic recovery on the next connection;
+#   6. that connecting is refused while another VPN holds the default route.
 set -eu
 
 cd "$(dirname "$0")/.."
 host_arch=$(docker info --format '{{.Architecture}}' | sed -e 's/x86_64/amd64/' -e 's/aarch64/arm64/')
-go_version=$(go env GOVERSION)
+# LINUX_GO_VERSION picks another (e.g. already downloaded) toolchain, such as go1.26.8.
+go_version=${LINUX_GO_VERSION:-$(go env GOVERSION)}
 toolchain_cache=${FYNE_CROSS_CACHE:-$HOME/Library/Caches/fyne-cross}/pkg/mod
 (cd / && GOTOOLCHAIN=local GOFLAGS=-modcacherw GOMODCACHE="$toolchain_cache" \
+	GOPROXY="${GOPROXY:-https://proxy.golang.org|https://goproxy.io|https://goproxy.cn|direct}" \
 	go mod download "golang.org/toolchain@v0.0.1-$go_version.linux-$host_arch")
 goroot=$toolchain_cache/golang.org/toolchain@v0.0.1-$go_version.linux-$host_arch
 chmod +x "$goroot"/bin/* "$goroot"/pkg/tool/*/*
@@ -159,6 +163,16 @@ start
 grep "cleaned up after an earlier crash" /tmp/mk.log | sed "s/^.*🧹/   🧹/" || true
 stop
 compare "reconnecting after a crash"
+
+echo
+echo "== 6. another VPN is active (tun9 holds the default route): connecting is refused"
+ip tuntap add dev tun9 mode tun; ip link set tun9 up
+ip route add 0.0.0.0/1 dev tun9; ip route add 128.0.0.0/1 dev tun9
+if /tmp/mkconnect --config $cfg run --mode tun >/tmp/mk.log 2>&1; then fail "connected although another VPN is active"; fi
+grep -q "another VPN is active (interface tun9)" /tmp/mk.log || fail "no clear error about the other VPN"
+echo "ok: $(grep -o "another VPN is active[^.]*" /tmp/mk.log | head -1)"
+ip link del tun9
+compare "the refused connection"
 echo
 echo "PASS"
 '

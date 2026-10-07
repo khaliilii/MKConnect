@@ -59,6 +59,9 @@ func Run(ctx context.Context, p profile.Profile, s profile.Settings, hooks Hooks
 		} else if len(cleaned) > 0 {
 			log.Printf("🧹 cleaned up after an earlier crash: %s", strings.Join(cleaned, ", "))
 		}
+		if err := checkOtherVPN(); err != nil {
+			return err
+		}
 		end, err := recovery.Begin()
 		if err != nil {
 			log.Printf("⚠️  crash recovery unavailable: %v", err)

@@ -188,11 +188,13 @@ func (p *platform) CreateBridge(adapter.BridgeOptions) (adapter.BridgeSession, e
 // UpdateDefaultInterface (ConnectivityManager callbacks).
 type monitor struct {
 	*platform
-	logger    logger.Logger
-	mu        sync.Mutex
-	def       *control.Interface
-	callbacks list.List[tun.DefaultInterfaceUpdateCallback]
-	mine      []string
+	logger      logger.Logger
+	mu          sync.Mutex
+	def         *control.Interface
+	initialized bool // def has been set at least once
+	callbacks   list.List[tun.DefaultInterfaceUpdateCallback]
+	mine        []string
+	updateMu    sync.Mutex // updates are applied one at a time, in order
 }
 
 var (
@@ -255,6 +257,8 @@ func (m *monitor) MyInterfaces() []string {
 }
 
 func (m *monitor) update(name string, index int32) {
+	m.updateMu.Lock()
+	defer m.updateMu.Unlock()
 	if m.networkManager != nil {
 		if err := m.networkManager.UpdateInterfaces(); err != nil && m.logger != nil {
 			m.logger.Error("update interfaces: ", err)
@@ -272,23 +276,30 @@ func (m *monitor) update(name string, index int32) {
 		iface = found
 	}
 	m.mu.Lock()
-	m.def = iface
+	old, initialized := m.def, m.initialized
+	m.def, m.initialized = iface, true
 	callbacks := m.callbacks.Array()
 	m.mu.Unlock()
+	// Android reports the same network again on every property change;
+	// resetting the connections each time would drop them for nothing.
+	if initialized && (old == nil) == (iface == nil) && (iface == nil || old.Index == iface.Index && old.Name == iface.Name) {
+		return
+	}
 	for _, cb := range callbacks {
 		cb(iface, 0)
 	}
 }
 
 // UpdateDefaultInterface is called by the app when Android's default network
-// changes (index -1: no network).
+// changes (index -1: no network). It is applied synchronously, so changes
+// arrive in the order Android reports them.
 func UpdateDefaultInterface(name string, index int32) {
 	monitorMu.Lock()
 	lastName, lastIndex = name, index
 	m := current
 	monitorMu.Unlock()
 	if m != nil {
-		go m.update(strings.TrimSpace(name), index)
+		m.update(strings.TrimSpace(name), index)
 	}
 }
 

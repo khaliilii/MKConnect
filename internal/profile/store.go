@@ -54,6 +54,12 @@ type Settings struct {
 
 	// SortBy orders the account list: "" (as added), "latency" or "speed".
 	SortBy string `json:"sort_by,omitempty"`
+
+	// Advanced TUN options: the network stack of the virtual interface
+	// ("system", "gvisor" or "mixed"; "" = sing-box's default) and its MTU
+	// (0 = default).
+	TUNStack string `json:"tun_stack,omitempty"`
+	TUNMTU   int    `json:"tun_mtu,omitempty"`
 }
 
 // DefaultSettings returns the settings used for a fresh install.
@@ -96,6 +102,14 @@ func (s *Settings) Validate() error {
 	}
 	if s.ListenPort < 1 || s.ListenPort > 65535 {
 		return fmt.Errorf("invalid listen port %d", s.ListenPort)
+	}
+	switch s.TUNStack {
+	case "", "system", "gvisor", "mixed":
+	default:
+		return fmt.Errorf("tun_stack must be system, gvisor or mixed")
+	}
+	if s.TUNMTU != 0 && (s.TUNMTU < 576 || s.TUNMTU > 65535) {
+		return fmt.Errorf("tun_mtu %d out of range", s.TUNMTU)
 	}
 	return nil
 }

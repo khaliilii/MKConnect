@@ -11,10 +11,12 @@ version=${1:-$(git describe --tags --always --dirty 2>/dev/null || echo dev)}
 arches=${*:-amd64 386 arm64 arm}
 
 host_arch=$(docker info --format '{{.Architecture}}' | sed -e 's/x86_64/amd64/' -e 's/aarch64/arm64/')
-go_version=$(go env GOVERSION)
+# LINUX_GO_VERSION picks another (e.g. already downloaded) toolchain, such as go1.26.8.
+go_version=${LINUX_GO_VERSION:-$(go env GOVERSION)}
 toolchain_cache=${FYNE_CROSS_CACHE:-$HOME/Library/Caches/fyne-cross}/pkg/mod
 # Run outside the module: the bootstrap Go may be older than go.mod requires.
 (cd / && GOTOOLCHAIN=local GOFLAGS=-modcacherw GOMODCACHE="$toolchain_cache" \
+	GOPROXY="${GOPROXY:-https://proxy.golang.org|https://goproxy.io|https://goproxy.cn|direct}" \
 	go mod download "golang.org/toolchain@v0.0.1-$go_version.linux-$host_arch")
 goroot=$toolchain_cache/golang.org/toolchain@v0.0.1-$go_version.linux-$host_arch
 # Module zips don't keep the executable bit (the go command restores it when it

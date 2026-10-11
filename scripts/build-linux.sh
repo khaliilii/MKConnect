@@ -60,7 +60,10 @@ arm) triplet=arm-linux-gnueabihf deb=armhf cc=arm-linux-gnueabihf-gcc ;;
 esac
 pkgs="gcc libc6-dev pkg-config wayland-protocols"
 # crossbuild-essential-<arch> = cross gcc + libc6-dev:<arch> (the target headers).
-if [ $deb = $native ]; then cc=gcc; else dpkg --add-architecture $deb; pkgs="$pkgs crossbuild-essential-$deb libc6-dev:$deb"; fi
+if [ $deb = $native ]; then cc=gcc; else
+	dpkg --add-architecture $deb; pkgs="$pkgs crossbuild-essential-$deb libc6-dev:$deb"
+	apt-get update -qq -o Acquire::Retries=8 >/dev/null 2>&1 || true # package lists of the added architecture
+fi
 for p in libgl1-mesa-dev libx11-dev libxcursor-dev libxrandr-dev libxinerama-dev libxi-dev libxxf86vm-dev libxkbcommon-dev libwayland-dev; do
 	pkgs="$pkgs $p:$deb"
 done

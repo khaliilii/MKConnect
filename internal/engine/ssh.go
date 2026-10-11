@@ -160,6 +160,15 @@ func (h *sshSocksHandler) NewConnectionEx(ctx context.Context, conn net.Conn, so
 		N.CloseOnHandshakeFailure(conn, onClose, err)
 		return
 	}
+	// The SOCKS reply is sent lazily, on the first read or write; sending it
+	// now, as sing-box does, keeps the two copy directions from racing on it.
+	if lazy, ok := conn.(N.ConnHandshakeSuccess); ok {
+		if err := lazy.ConnHandshakeSuccess(remote); err != nil {
+			remote.Close()
+			N.CloseOnHandshakeFailure(conn, onClose, err)
+			return
+		}
+	}
 	err = bufio.CopyConn(ctx, conn, remote)
 	remote.Close()
 	if onClose != nil {

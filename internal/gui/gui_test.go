@@ -21,6 +21,11 @@ import (
 	"github.com/khaliilii/MKConnect/internal/profile"
 )
 
+// The test driver can't serialize background refreshes with the tests, so
+// the session box's ticker effectively never fires (set once: a running
+// ticker goroutine of an earlier test still reads the variable).
+func init() { sessionRefreshInterval = time.Hour }
+
 // newTestUI builds the main window on Fyne's headless test driver.
 func newTestUI(t *testing.T) *ui {
 	t.Helper()
@@ -46,7 +51,6 @@ func newTestUI(t *testing.T) *ui {
 	store.Settings.ListenPort = freePort(t)
 	store.Settings.LogLevel = "error"
 
-	sessionRefreshInterval = time.Hour // the test driver can't serialize background refreshes
 	u := &ui{app: a, store: store, logs: &logBuffer{}}
 	u.win = a.NewWindow("MKConnect")
 	u.win.Resize(fyne.NewSize(1000, 680))

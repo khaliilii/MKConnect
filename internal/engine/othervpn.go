@@ -51,7 +51,7 @@ func checkOtherVPN() error {
 	if err != nil || iface == "" {
 		// An interface that already has our tunnel address is just as bad: the
 		// routes "via <address>" would lead into it instead of into our TUN.
-		if iface = interfaceWithAddress(tunAddresses()); iface == "" {
+		if iface = interfaceWithAddress(tunAddresses(true)); iface == "" {
 			return nil
 		}
 	}

@@ -193,3 +193,23 @@ func TestTUNGatewayConfig(t *testing.T) {
 		t.Fatalf("session doesn't show the gateway: %v", session.Inbounds)
 	}
 }
+
+func TestTUNIPv6Setting(t *testing.T) {
+	s := testSettings(t)
+	s.Mode = profile.ModeTUN
+	p := profile.Profile{Type: profile.TypeTrojan, Server: "h.com", Port: 443, Password: "x"}
+	cfg, err := singBoxConfig(&p, &s, &tunOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	tun := cfg["inbounds"].([]obj)[1]
+	if addrs := tun["address"].([]string); len(addrs) != 1 || cfg["dns"].(obj)["strategy"] != "ipv4_only" {
+		t.Fatalf("IPv6 off: addresses %v, dns strategy %v", addrs, cfg["dns"].(obj)["strategy"])
+	}
+	s.IPv6 = true
+	cfg, _ = singBoxConfig(&p, &s, &tunOptions{})
+	tun = cfg["inbounds"].([]obj)[1]
+	if addrs := tun["address"].([]string); len(addrs) != 2 || cfg["dns"].(obj)["strategy"] != nil {
+		t.Fatalf("IPv6 on: addresses %v, dns strategy %v", addrs, cfg["dns"].(obj)["strategy"])
+	}
+}

@@ -55,6 +55,11 @@ type Settings struct {
 	// SortBy orders the account list: "" (as added), "latency" or "speed".
 	SortBy string `json:"sort_by,omitempty"`
 
+	// IPv6 routes sites' IPv6 addresses through the tunnel too. Off by default:
+	// most servers have no IPv6, and the TUN accepts such connections locally
+	// and lets them hang instead of falling back to IPv4.
+	IPv6 bool `json:"ipv6,omitempty"`
+
 	// Advanced TUN options: the network stack of the virtual interface
 	// ("system", "gvisor" or "mixed"; "" = sing-box's default) and its MTU
 	// (0 = default).

@@ -296,6 +296,7 @@ type mobileSettings struct {
 	ProxyUser string `json:"proxy_user"`
 	ProxyPass string `json:"proxy_pass"`
 	RemoteDNS string `json:"remote_dns"`
+	IPv6      bool   `json:"ipv6"`
 }
 
 // Settings returns the phone settings as JSON.
@@ -312,7 +313,7 @@ func Settings() (string, error) {
 		mode = "vpn"
 	}
 	data, _ := json.Marshal(mobileSettings{Mode: mode, Port: st.ListenPort, AllowLAN: st.AllowLAN,
-		ProxyUser: st.ProxyUser, ProxyPass: st.ProxyPass, RemoteDNS: st.RemoteDNS})
+		ProxyUser: st.ProxyUser, ProxyPass: st.ProxyPass, RemoteDNS: st.RemoteDNS, IPv6: st.IPv6})
 	return string(data), nil
 }
 
@@ -329,7 +330,7 @@ func SetSettings(data string) error {
 		return err
 	}
 	st := s.Settings
-	st.ListenPort, st.AllowLAN, st.ProxyUser, st.ProxyPass = in.Port, in.AllowLAN, in.ProxyUser, in.ProxyPass
+	st.ListenPort, st.AllowLAN, st.ProxyUser, st.ProxyPass, st.IPv6 = in.Port, in.AllowLAN, in.ProxyUser, in.ProxyPass, in.IPv6
 	if in.RemoteDNS != "" {
 		st.RemoteDNS = in.RemoteDNS
 	}

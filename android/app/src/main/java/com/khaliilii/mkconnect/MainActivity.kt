@@ -326,6 +326,7 @@ fun SettingsScreen(onMessage: (String) -> Unit) {
     var user by remember { mutableStateOf(initial.optString("proxy_user")) }
     var pass by remember { mutableStateOf(initial.optString("proxy_pass")) }
     var dns by remember { mutableStateOf(initial.optString("remote_dns", "1.1.1.1")) }
+    var ipv6 by remember { mutableStateOf(initial.optBoolean("ipv6")) }
 
     fun save() {
         val json = JSONObject().apply {
@@ -335,6 +336,7 @@ fun SettingsScreen(onMessage: (String) -> Unit) {
             put("proxy_user", user)
             put("proxy_pass", pass)
             put("remote_dns", dns)
+            put("ipv6", ipv6)
         }
         runCatching { Mkmobile.setSettings(json.toString()) }.onFailure { onMessage(it.message ?: "invalid settings") }
     }
@@ -362,6 +364,10 @@ fun SettingsScreen(onMessage: (String) -> Unit) {
         OutlinedTextField(pass, { pass = it; save() }, label = { Text("Proxy password (optional)") },
             visualTransformation = PasswordVisualTransformation(), modifier = Modifier.fillMaxWidth())
         OutlinedTextField(dns, { dns = it; save() }, label = { Text("DNS through the tunnel") }, modifier = Modifier.fillMaxWidth())
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Switch(ipv6, { ipv6 = it; save() }); Spacer(Modifier.width(8.dp))
+            Text("IPv6 through the tunnel (only if the server has IPv6)")
+        }
         Text("Changes apply on the next connect.", style = MaterialTheme.typography.bodySmall)
     }
 }

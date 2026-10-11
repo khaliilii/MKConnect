@@ -62,7 +62,7 @@ func newSession(p *profile.Profile, s *profile.Settings, primary Engine) *Sessio
 		inbounds[0] += " (LAN)"
 	}
 	if s.Mode == profile.ModeTUN {
-		inbounds = append(inbounds, "TUN "+tunAddresses()[0]+" (all system traffic)")
+		inbounds = append(inbounds, "TUN "+tunAddresses(s.IPv6)[0]+" (all system traffic)")
 		if len(s.ShareInterfaces) > 0 {
 			inbounds = append(inbounds, "Gateway for devices on "+strings.Join(s.ShareInterfaces, ", "))
 		}

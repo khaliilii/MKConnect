@@ -41,7 +41,13 @@ const TUNName = "MKConnect"
 // sing-box's defaults (172.19.0.1, fdfe:dcba:9876::1): other sing-box based
 // apps (Hiddify, nekoray, ...) use those, and when such an app's interface is
 // still around, routes "via 172.19.0.1" lead into it instead of into ours.
-func tunAddresses() []string { return []string{"172.19.77.1/30", "fd6d:6b63:6f6e::1/126"} }
+func tunAddresses(ipv6 bool) []string {
+	addrs := []string{"172.19.77.1/30"}
+	if ipv6 {
+		addrs = append(addrs, "fd6d:6b63:6f6e::1/126")
+	}
+	return addrs
+}
 
 // singBoxConfig builds a complete sing-box config that exposes a mixed
 // (SOCKS5 + HTTP) proxy and, when tun is set, a TUN interface.
@@ -93,7 +99,7 @@ func singBoxBase(s *profile.Settings, proxyOut obj, tun *tunOptions) obj {
 		t := obj{
 			"type":         "tun",
 			"tag":          "tun-in",
-			"address":      tunAddresses(),
+			"address":      tunAddresses(s.IPv6),
 			"auto_route":   true,
 			"strict_route": true,
 		}
@@ -126,6 +132,11 @@ func singBoxBase(s *profile.Settings, proxyOut obj, tun *tunOptions) obj {
 			"type": "tcp", "tag": tagRemote, "server": s.RemoteDNS, "detour": tagProxy,
 		})
 		dns["final"] = tagRemote
+		if !s.IPv6 {
+			// Without IPv6 on the TUN, sites must be reached over IPv4: answer
+			// AAAA queries empty, so apps don't try addresses that would hang.
+			dns["strategy"] = "ipv4_only"
+		}
 		rules = append([]obj{
 			{"action": "sniff"},
 			{"protocol": "dns", "action": "hijack-dns"},

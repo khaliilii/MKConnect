@@ -104,6 +104,8 @@ func (u *ui) newConnectionPanel() fyne.CanvasObject {
 	remoteDNS := entry(s.RemoteDNS, "1.1.1.1")
 	clipboard := widget.NewCheck("Auto-add links copied to the clipboard", nil)
 	clipboard.SetChecked(s.ClipboardImport)
+	ipv6 := widget.NewCheck("IPv6 through the tunnel (only if the server has IPv6)", nil)
+	ipv6.SetChecked(s.IPv6)
 
 	updateVisibility := func() {
 		form.setVisible(extBox, s.Core == profile.CoreExternal)
@@ -126,6 +128,7 @@ func (u *ui) newConnectionPanel() fyne.CanvasObject {
 		s.ProxyUser, s.ProxyPass = strings.TrimSpace(proxyUser.Text), proxyPass.Text
 		s.RemoteDNS = strings.TrimSpace(remoteDNS.Text)
 		s.ClipboardImport = clipboard.Checked
+		s.IPv6 = ipv6.Checked
 		updateVisibility()
 		u.save()
 	}
@@ -134,6 +137,7 @@ func (u *ui) newConnectionPanel() fyne.CanvasObject {
 	mode.OnChanged = func(string) { changed() }
 	lan.OnChanged = func(bool) { changed() }
 	clipboard.OnChanged = func(bool) { changed() }
+	ipv6.OnChanged = func(bool) { changed() }
 	share.OnChanged = func(labels []string) {
 		if runtime.GOOS == "windows" && len(labels) > 1 {
 			// Internet Connection Sharing supports one adapter: keep the newest choice.
@@ -163,6 +167,7 @@ func (u *ui) newConnectionPanel() fyne.CanvasObject {
 		{Text: "Proxy password", Widget: proxyPass},
 		{Text: "Tunnel DNS", Widget: remoteDNS},
 		{Text: "", Widget: clipboard},
+		{Text: "", Widget: ipv6},
 	})
 	updateVisibility()
 	u.settingsBox = settings

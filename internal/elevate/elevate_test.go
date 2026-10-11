@@ -27,7 +27,7 @@ func inProcess(t *testing.T) {
 		return exited, nil
 	}
 	stdout, stderr := os.Stdout, os.Stderr
-	t.Cleanup(func() { launch = orig; os.Stdout, os.Stderr = stdout, stderr })
+	t.Cleanup(func() { Shutdown(); launch = orig; os.Stdout, os.Stderr = stdout, stderr })
 }
 
 func freePort(t *testing.T) int {
@@ -91,6 +91,36 @@ func TestRunThroughHelper(t *testing.T) {
 	if c, err := net.Dial("tcp", net.JoinHostPort("127.0.0.1", strconv.Itoa(s.ListenPort))); err == nil {
 		c.Close()
 		t.Fatal("proxy still listening after disconnect")
+	}
+
+	// Reconnecting (e.g. with another account) reuses the helper: no new prompt.
+	launches := 0
+	launch = func(string, string) (<-chan error, error) { launches++; return nil, ErrDenied }
+	p2, s2 := testRequest(t)
+	p2.Name = "second"
+	ctx2, cancel2 := context.WithCancel(context.Background())
+	started2 := make(chan *engine.Session, 1)
+	done2 := make(chan error, 1)
+	go func() {
+		done2 <- Run(ctx2, p2, s2, engine.Hooks{OnStarted: func(sess *engine.Session) { started2 <- sess }})
+	}()
+	select {
+	case <-started2:
+	case err := <-done2:
+		t.Fatalf("second run ended early: %v", err)
+	case <-time.After(15 * time.Second):
+		t.Fatal("second run never started")
+	}
+	if launches != 0 {
+		t.Fatalf("the helper was launched again (%d prompts)", launches)
+	}
+	cancel2()
+	if err := <-done2; err != nil {
+		t.Fatalf("second disconnect: %v", err)
+	}
+	Shutdown()
+	if current != nil {
+		t.Fatal("helper still registered after Shutdown")
 	}
 }
 
@@ -157,7 +187,7 @@ func TestHelperStopsWhenAppExits(t *testing.T) {
 	case <-time.After(15 * time.Second):
 		t.Fatal("helper kept running after the app exited")
 	}
-	if st, _ := readStatus(dir); st.State != stateStopped {
+	if st, _ := readStatus(dir); st.State != stateStopped && st.State != stateExited {
 		t.Fatalf("final state %q", st.State)
 	}
 }

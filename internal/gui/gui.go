@@ -18,6 +18,7 @@ import (
 	"fyne.io/fyne/v2/theme"
 	"fyne.io/fyne/v2/widget"
 
+	"github.com/khaliilii/MKConnect/internal/elevate"
 	"github.com/khaliilii/MKConnect/internal/engine"
 	"github.com/khaliilii/MKConnect/internal/profile"
 )
@@ -83,6 +84,7 @@ func Run(icon []byte) {
 	captureOutput(logs)
 
 	a := app.NewWithID("com.khaliilii.mkconnect")
+	a.Lifecycle().SetOnStopped(elevate.Shutdown) // the privileged TUN helper, if any
 	res := fyne.NewStaticResource("icon.png", icon)
 	a.SetIcon(res)
 

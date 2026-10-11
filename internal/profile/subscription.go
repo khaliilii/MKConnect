@@ -101,12 +101,49 @@ const userAgent = "v2rayN/7.0 MKConnect"
 
 // FetchSubscription downloads a subscription and its metadata headers.
 func FetchSubscription(rawURL string) (*SubscriptionData, error) {
+	return FetchSubscriptionVia(rawURL, "")
+}
+
+// FetchSubscriptionVia downloads a subscription directly and, when that fails
+// and a proxy ("socks5://[user:pass@]host:port") is given, once more through
+// the proxy: providers' sites are often blocked where their users are, while
+// the tunnel reaches them.
+func FetchSubscriptionVia(rawURL, proxyURL string) (*SubscriptionData, error) {
+	data, direct := fetch(rawURL, nil)
+	if direct == nil {
+		return data, nil
+	}
+	if proxyURL == "" {
+		return nil, describeFetchError(direct)
+	}
+	pu, err := url.Parse(proxyURL)
+	if err != nil {
+		return nil, describeFetchError(direct)
+	}
+	data, viaProxy := fetch(rawURL, http.ProxyURL(pu))
+	if viaProxy == nil {
+		return data, nil
+	}
+	return nil, fmt.Errorf("%w; through the tunnel: %v", describeFetchError(direct), viaProxy)
+}
+
+// describeFetchError explains the usual way a blocked site fails.
+func describeFetchError(err error) error {
+	msg := err.Error()
+	if strings.HasSuffix(msg, "EOF") || strings.Contains(msg, "connection reset") || strings.Contains(msg, "tls:") {
+		return fmt.Errorf("the subscription server closed the connection (the site may be blocked or down): %w", err)
+	}
+	return err
+}
+
+func fetch(rawURL string, proxy func(*http.Request) (*url.URL, error)) (*SubscriptionData, error) {
 	req, err := http.NewRequest(http.MethodGet, rawURL, nil)
 	if err != nil {
 		return nil, err
 	}
 	req.Header.Set("User-Agent", userAgent)
-	client := &http.Client{Timeout: 30 * time.Second}
+	client := &http.Client{Timeout: 30 * time.Second, Transport: &http.Transport{Proxy: proxy}}
+	defer client.CloseIdleConnections()
 	resp, err := client.Do(req)
 	if err != nil {
 		return nil, err

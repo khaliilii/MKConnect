@@ -1,7 +1,9 @@
 package profile
 
 import (
+	"context"
 	"encoding/base64"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -9,6 +11,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/armon/go-socks5"
 )
 
 func TestParseUserInfo(t *testing.T) {
@@ -50,6 +54,42 @@ func TestFetchSubscription(t *testing.T) {
 	n, errs := s.ApplySubscription(g, data, time.Now())
 	if n != 2 || len(errs) != 0 || g.Name != "My VPN" {
 		t.Fatalf("n=%d errs=%v name=%q", n, errs, g.Name)
+	}
+}
+
+func TestFetchSubscriptionViaProxy(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Profile-Title", "Via proxy")
+		w.Write([]byte("trojan://a@h.com:443#one\n"))
+	}))
+	defer srv.Close()
+	// A SOCKS proxy that reaches the server whatever address is asked for.
+	proxy, err := socks5.New(&socks5.Config{Dial: func(ctx context.Context, network, addr string) (net.Conn, error) {
+		return net.Dial("tcp", strings.TrimPrefix(srv.URL, "http://"))
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	l, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer l.Close()
+	go proxy.Serve(l)
+
+	closed, _ := net.Listen("tcp", "127.0.0.1:0")
+	unreachable := "http://" + closed.Addr().String() + "/sub"
+	closed.Close()
+
+	if _, err := FetchSubscriptionVia(unreachable, ""); err == nil {
+		t.Fatal("direct download of an unreachable site succeeded")
+	}
+	data, err := FetchSubscriptionVia(unreachable, "socks5://"+l.Addr().String())
+	if err != nil || data.Title != "Via proxy" {
+		t.Fatalf("via proxy: %v %+v", err, data)
+	}
+	if _, err := FetchSubscriptionVia(unreachable, "socks5://127.0.0.1:1"); err == nil || !strings.Contains(err.Error(), "through the tunnel") {
+		t.Fatalf("both failing: %v", err)
 	}
 }
 

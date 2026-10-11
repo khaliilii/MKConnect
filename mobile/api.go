@@ -158,7 +158,7 @@ type importResult struct {
 }
 
 func addSubscription(url string) (string, error) {
-	data, err := profile.FetchSubscription(url) // network: outside the lock
+	data, err := profile.FetchSubscriptionVia(url, fetchProxy()) // network: outside the lock
 	if err != nil {
 		return "", err
 	}
@@ -208,7 +208,7 @@ func UpdateSubscriptions() (int32, error) {
 	var ok int32
 	var lastErr error
 	for i, url := range urls {
-		data, err := profile.FetchSubscription(url)
+		data, err := profile.FetchSubscriptionVia(url, fetchProxy())
 		if err != nil {
 			lastErr = err
 			continue

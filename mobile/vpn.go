@@ -3,6 +3,8 @@ package mkmobile
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
@@ -52,6 +54,7 @@ var (
 	running   engine.Engine
 	session   *engine.Session
 	runState  = "idle"
+	runProxy  string // socks5 URL of the running local proxy, "" in VPN mode or idle
 	runErr    string
 	runName   string
 	dataDir   string
@@ -107,6 +110,13 @@ func Start(app Platform) error {
 	running = e
 	session = engine.NewSessionFor(prof, settings, e)
 	runState = "connected"
+	runProxy = ""
+	if !vpn {
+		runProxy = fmt.Sprintf("socks5://127.0.0.1:%d", settings.ListenPort)
+		if settings.ProxyUser != "" {
+			runProxy = fmt.Sprintf("socks5://%s:%s@127.0.0.1:%d", url.QueryEscape(settings.ProxyUser), url.QueryEscape(settings.ProxyPass), settings.ListenPort)
+		}
+	}
 	return nil
 }
 
@@ -124,9 +134,16 @@ func Stop() error {
 		return nil
 	}
 	err := running.Close()
-	running, session, activeApp = nil, nil, nil
+	running, session, activeApp, runProxy = nil, nil, nil, ""
 	runState = "idle"
 	return err
+}
+
+// fetchProxy returns the running local proxy for downloads that fail directly.
+func fetchProxy() string {
+	runMu.Lock()
+	defer runMu.Unlock()
+	return runProxy
 }
 
 // Status returns {"state","profile","error","core","inbounds","outbound","up","down"} as JSON.

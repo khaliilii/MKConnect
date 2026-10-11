@@ -2,6 +2,7 @@ package gui
 
 import (
 	"fmt"
+	neturl "net/url"
 	"strings"
 	"time"
 
@@ -385,10 +386,10 @@ func (u *ui) updateSubscription(groupID string, interactive bool) {
 	if err != nil || !g.IsSubscription() {
 		return
 	}
-	url, name := g.URL, g.Name
+	url, name, proxy := g.URL, g.Name, u.fetchProxy()
 	u.groupUpdateBtn.Disable()
 	go func() {
-		data, err := profile.FetchSubscription(url)
+		data, err := profile.FetchSubscriptionVia(url, proxy)
 		fyne.Do(func() {
 			u.groupUpdateBtn.Enable()
 			if err != nil {
@@ -417,6 +418,21 @@ func (u *ui) updateSubscription(groupID string, interactive bool) {
 			u.refreshProfiles()
 		})
 	}()
+}
+
+// fetchProxy returns the running local proxy as a URL for downloads that fail
+// directly, or "" when not connected. In TUN mode direct downloads already go
+// through the tunnel.
+func (u *ui) fetchProxy() string {
+	s := u.store.Settings
+	if u.session == nil || s.Mode != profile.ModeProxy {
+		return ""
+	}
+	p := &neturl.URL{Scheme: "socks5", Host: fmt.Sprintf("127.0.0.1:%d", s.ListenPort)}
+	if s.ProxyUser != "" {
+		p.User = neturl.UserPassword(s.ProxyUser, s.ProxyPass)
+	}
+	return p.String()
 }
 
 // autoUpdateSubscriptions refreshes subscriptions that are due, now and every 30 minutes.

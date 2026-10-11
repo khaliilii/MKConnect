@@ -291,6 +291,9 @@ func (u *ui) setState(st connState, name string) {
 	}
 	u.statusLabel.Refresh()
 	u.connectBtn.Refresh()
+	if u.refreshSession != nil {
+		u.refreshSession() // show or hide the session box right away
+	}
 	if u.trayConnect != nil {
 		u.trayConnect.Label = map[bool]string{true: "Connect", false: "Disconnect"}[st == stateIdle]
 		u.trayMenu.Refresh()
@@ -395,13 +398,18 @@ func (u *ui) newSessionBox(relayout func()) fyne.CanvasObject {
 		download.SetText(fmt.Sprintf("%10s/s   total %s", profile.FormatBytes(int64(float64(down-lastDn)/secs)), profile.FormatBytes(down)))
 		lastUp, lastDn, lastAt = up, down, time.Now()
 	}
+	u.refreshSession = refresh
 	go func() {
-		for range time.Tick(time.Second) {
+		for range time.Tick(sessionRefreshInterval) {
 			fyne.Do(refresh)
 		}
 	}()
 	return box
 }
+
+// sessionRefreshInterval is how often the traffic counters update; tests
+// make it long, so the background refresh doesn't race the test driver.
+var sessionRefreshInterval = time.Second
 
 func tunPrivilegeHint() string {
 	switch runtime.GOOS {

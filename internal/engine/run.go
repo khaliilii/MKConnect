@@ -183,7 +183,10 @@ func start(ctx context.Context, p *profile.Profile, s *profile.Settings) ([]Engi
 		return engines, nil
 	}
 
-	cfg := singBoxTUNConfig(s, s.ListenPort, &tunOptions{ExcludeAddrs: exclude, Gateway: len(s.ShareInterfaces) > 0})
+	cfg := singBoxTUNConfig(s, s.ListenPort, &tunOptions{
+		ExcludeAddrs: exclude, Gateway: len(s.ShareInterfaces) > 0,
+		UDPDNS: p.Type == profile.TypeSSH && p.UDPGWPort > 0 && p.UDPGWDNS,
+	})
 	data, err := marshal(cfg)
 	if err != nil {
 		return engines, err

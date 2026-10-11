@@ -46,6 +46,7 @@ func newTestUI(t *testing.T) *ui {
 	store.Settings.ListenPort = freePort(t)
 	store.Settings.LogLevel = "error"
 
+	sessionRefreshInterval = time.Hour // the test driver can't serialize background refreshes
 	u := &ui{app: a, store: store, logs: &logBuffer{}}
 	u.win = a.NewWindow("MKConnect")
 	u.win.Resize(fyne.NewSize(1000, 680))
@@ -148,7 +149,6 @@ func TestConnectDisconnect(t *testing.T) {
 	u.list.Select(2) // trojan: sing-box starts without reaching the server
 	u.connect()
 	waitFor(t, func() bool { return u.state == stateConnected })
-	time.Sleep(1500 * time.Millisecond) // let the session box tick once
 	screenshot(t, u.win, "connected")
 
 	c, err := net.Dial("tcp", net.JoinHostPort("127.0.0.1", strconv.Itoa(u.store.Settings.ListenPort)))

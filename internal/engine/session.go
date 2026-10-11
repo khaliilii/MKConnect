@@ -77,6 +77,13 @@ func newSession(p *profile.Profile, s *profile.Settings, primary Engine) *Sessio
 	if p.TLS.Mode != "" {
 		out = append(out, p.TLS.Mode)
 	}
+	if p.Type == profile.TypeSSH && p.UDPGWPort > 0 {
+		u := fmt.Sprintf("udpgw :%d", p.UDPGWPort)
+		if p.UDPGWDNS {
+			u += " + transparent DNS"
+		}
+		out = append(out, u)
+	}
 
 	session := &Session{Core: core, Inbounds: inbounds, Outbound: strings.Join(out, " · ")}
 	if c, ok := primary.(trafficCounter); ok {

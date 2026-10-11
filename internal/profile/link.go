@@ -252,9 +252,12 @@ func parseSSH(link string) (Profile, error) {
 		}
 	}
 	pass, _ := u.User.Password()
+	q := u.Query()
+	udpgw, _ := strconv.Atoi(q.Get("udpgw"))
 	return Profile{
 		Name: u.Fragment, Type: TypeSSH, Server: u.Hostname(), Port: port,
 		User: u.User.Username(), Password: pass,
+		UDPGWPort: udpgw, UDPGWDNS: udpgw > 0 && (q.Get("udpgw_dns") == "1" || q.Get("udpgw_dns") == "true"),
 	}, nil
 }
 
@@ -382,6 +385,13 @@ func (p *Profile) Link() string {
 	case TypeSSH:
 		// The password is deliberately left out of exported SSH links.
 		u := url.URL{Scheme: "ssh", User: url.User(p.User), Host: p.Address(), Fragment: p.Name}
+		if p.UDPGWPort > 0 {
+			q := url.Values{"udpgw": {strconv.Itoa(p.UDPGWPort)}}
+			if p.UDPGWDNS {
+				q.Set("udpgw_dns", "1")
+			}
+			u.RawQuery = q.Encode()
+		}
 		return u.String()
 	}
 	return ""

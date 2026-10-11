@@ -31,6 +31,9 @@ type tunOptions struct {
 	ExcludeAddrs []string
 	// Gateway routes traffic forwarded from other interfaces (gateway mode).
 	Gateway bool
+	// UDPDNS sends DNS through the proxy over UDP instead of TCP (SSH with
+	// udpgw transparent DNS: the server's resolver answers).
+	UDPDNS bool
 }
 
 // TUNName is the name of the TUN interface on systems that allow choosing it
@@ -127,9 +130,14 @@ func singBoxBase(s *profile.Settings, proxyOut obj, tun *tunOptions) obj {
 		}
 		inbounds = append(inbounds, t)
 
-		// Resolve through the tunnel over TCP (SSH and SOCKS upstreams can't carry UDP).
+		// Resolve through the tunnel over TCP (SSH and SOCKS upstreams can't carry
+		// UDP), unless udpgw carries it and answers with the server's resolver.
+		dnsType := "tcp"
+		if tun.UDPDNS {
+			dnsType = "udp"
+		}
 		dns["servers"] = append(dnsServers, obj{
-			"type": "tcp", "tag": tagRemote, "server": s.RemoteDNS, "detour": tagProxy,
+			"type": dnsType, "tag": tagRemote, "server": s.RemoteDNS, "detour": tagProxy,
 		})
 		dns["final"] = tagRemote
 		if !s.IPv6 {

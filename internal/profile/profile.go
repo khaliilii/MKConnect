@@ -38,6 +38,11 @@ type Profile struct {
 	Password       string `json:"password,omitempty"` // also Trojan / Shadowsocks password
 	PrivateKeyPath string `json:"private_key_path,omitempty"`
 	HostKey        string `json:"host_key,omitempty"` // authorized_keys format, pinned on first connect
+	// UDPGWPort is the port of badvpn-udpgw on the SSH server (0 = none):
+	// carries UDP through the tunnel. UDPGWDNS makes udpgw answer DNS with
+	// the server's own resolver (transparent DNS), overriding the DNS setting.
+	UDPGWPort int  `json:"udpgw_port,omitempty"`
+	UDPGWDNS  bool `json:"udpgw_dns,omitempty"`
 
 	// VMess / VLESS
 	UUID     string `json:"uuid,omitempty"`
@@ -111,6 +116,9 @@ func (p *Profile) Validate() error {
 	}
 	switch p.Type {
 	case TypeSSH:
+		if p.UDPGWPort < 0 || p.UDPGWPort > 65535 {
+			return fmt.Errorf("ssh: invalid udpgw port %d", p.UDPGWPort)
+		}
 		if p.User == "" {
 			return fmt.Errorf("ssh: user is required")
 		}
@@ -130,6 +138,9 @@ func (p *Profile) Validate() error {
 			return fmt.Errorf("shadowsocks: method and password are required")
 		}
 	case TypeHysteria2:
+		if p.UDPGWPort != 0 {
+			return fmt.Errorf("udpgw only applies to SSH")
+		}
 		if p.Password == "" {
 			return fmt.Errorf("hysteria2: password is required")
 		}

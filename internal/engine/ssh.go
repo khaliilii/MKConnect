@@ -1,11 +1,13 @@
 package engine
 
 import (
+	stdbufio "bufio"
 	"context"
 	"crypto/sha256"
 	"encoding/base64"
 	"errors"
 	"fmt"
+	"io"
 	"log"
 	"net"
 	"os"
@@ -14,7 +16,11 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/armon/go-socks5"
+	"github.com/sagernet/sing/common/auth"
+	"github.com/sagernet/sing/common/bufio"
+	M "github.com/sagernet/sing/common/metadata"
+	N "github.com/sagernet/sing/common/network"
+	"github.com/sagernet/sing/protocol/socks"
 	"golang.org/x/crypto/ssh"
 
 	"github.com/khaliilii/MKConnect/internal/profile"
@@ -97,36 +103,102 @@ func startSSH(p *profile.Profile, s *profile.Settings) (Engine, error) {
 		return nil, err
 	}
 
-	socksConf := &socks5.Config{
-		Dial:     func(ctx context.Context, network, addr string) (net.Conn, error) { return e.dial(network, addr) },
-		Resolver: remoteResolver{}, // let the SSH server resolve names
-		Logger:   log.New(os.Stderr, "socks5: ", log.LstdFlags),
-	}
+	var authenticator *auth.Authenticator
 	if s.ProxyUser != "" {
-		socksConf.Credentials = socks5.StaticCredentials{s.ProxyUser: s.ProxyPass}
+		authenticator = auth.NewAuthenticator([]auth.User{{Username: s.ProxyUser, Password: s.ProxyPass}})
 	}
-	server, err := socks5.New(socksConf)
-	if err != nil {
-		e.Close()
-		return nil, err
-	}
+	handler := &sshSocksHandler{e: e, udpgwPort: p.UDPGWPort, dns: p.UDPGWDNS}
 	e.listener, err = net.Listen("tcp", net.JoinHostPort(s.ListenAddress(), fmt.Sprint(s.ListenPort)))
 	if err != nil {
 		e.Close()
 		return nil, err
 	}
 	go func() {
-		if err := server.Serve(e.listener); err != nil {
-			select {
-			case <-e.closed:
-			default:
-				e.done <- fmt.Errorf("socks5 server: %w", err)
+		for {
+			conn, err := e.listener.Accept()
+			if err != nil {
+				select {
+				case <-e.closed:
+				default:
+					e.done <- fmt.Errorf("socks5 server: %w", err)
+				}
+				return
 			}
+			go func() {
+				defer conn.Close()
+				err := socks.HandleConnectionEx(context.Background(), conn, stdbufio.NewReader(conn), authenticator,
+					handler, udpListener{}, 5*time.Minute, M.SocksaddrFromNet(conn.RemoteAddr()), nil)
+				if err != nil && !errors.Is(err, io.EOF) && !errors.Is(err, net.ErrClosed) {
+					log.Printf("socks5: %v", err)
+				}
+			}()
 		}
 	}()
 	go e.keepAlive()
-	log.Printf("ℹ️  Built-in SSH core serves SOCKS5 only (no HTTP proxy, no UDP)")
+	if p.UDPGWPort > 0 {
+		log.Printf("ℹ️  Built-in SSH core serves SOCKS5 (no HTTP proxy); UDP through udpgw on the server's port %d", p.UDPGWPort)
+	} else {
+		log.Printf("ℹ️  Built-in SSH core serves SOCKS5 only (no HTTP proxy, no UDP; set a udpgw port for UDP)")
+	}
 	return e, nil
+}
+
+// sshSocksHandler serves the SOCKS5 requests: TCP through the SSH tunnel,
+// UDP through badvpn-udpgw on the server (when a port is set).
+type sshSocksHandler struct {
+	e         *sshEngine
+	udpgwPort int
+	dns       bool
+}
+
+func (h *sshSocksHandler) NewConnectionEx(ctx context.Context, conn net.Conn, source, destination M.Socksaddr, onClose N.CloseHandlerFunc) {
+	// The destination is passed as given (name or IP): the SSH server resolves names.
+	remote, err := h.e.dial("tcp", destination.String())
+	if err != nil {
+		log.Printf("socks5: %s: %v", destination, err)
+		conn.Close()
+		N.CloseOnHandshakeFailure(conn, onClose, err)
+		return
+	}
+	err = bufio.CopyConn(ctx, conn, remote)
+	remote.Close()
+	if onClose != nil {
+		onClose(err)
+	}
+}
+
+func (h *sshSocksHandler) NewPacketConnectionEx(ctx context.Context, conn N.PacketConn, source, destination M.Socksaddr, onClose N.CloseHandlerFunc) {
+	if h.udpgwPort == 0 {
+		err := errors.New("UDP needs a udpgw port on the SSH account")
+		conn.Close()
+		if onClose != nil {
+			onClose(err)
+		}
+		return
+	}
+	tunnel, err := h.e.dial("tcp", fmt.Sprintf("127.0.0.1:%d", h.udpgwPort))
+	if err != nil {
+		log.Printf("udpgw: %v", err)
+		conn.Close()
+		if onClose != nil {
+			onClose(err)
+		}
+		return
+	}
+	err = relayUDPGW(tunnel, conn, h.dns)
+	if err != nil {
+		log.Printf("udpgw: %v", err)
+	}
+	if onClose != nil {
+		onClose(err)
+	}
+}
+
+// udpListener opens the local socket of a SOCKS UDP association.
+type udpListener struct{}
+
+func (udpListener) ListenPacket(lc net.ListenConfig, ctx context.Context, network, address string) (net.PacketConn, error) {
+	return lc.ListenPacket(ctx, network, address)
 }
 
 func sshClientConfig(p *profile.Profile) (*ssh.ClientConfig, error) {
@@ -291,11 +363,4 @@ func (c *countingConn) Write(b []byte) (int, error) {
 	n, err := c.Conn.Write(b)
 	c.up.Add(int64(n))
 	return n, err
-}
-
-// remoteResolver skips local DNS so hostnames are resolved by the SSH server.
-type remoteResolver struct{}
-
-func (remoteResolver) Resolve(ctx context.Context, _ string) (context.Context, net.IP, error) {
-	return ctx, nil, nil
 }

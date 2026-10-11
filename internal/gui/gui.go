@@ -60,8 +60,9 @@ type ui struct {
 	testLabel    *widget.Label
 	testCancel   context.CancelFunc // non-nil while a server test runs
 
-	lastClipboard string
-	session       *engine.Session // nil while disconnected
+	lastClipboard  string
+	session        *engine.Session // nil while disconnected
+	refreshSession func()          // updates the session box from u.session
 
 	state  connState
 	cancel context.CancelFunc

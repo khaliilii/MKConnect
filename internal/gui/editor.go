@@ -72,15 +72,25 @@ func (u *ui) openEditor(p profile.Profile, isNew bool) {
 			hostKey = ""
 			hostKeyLabel.SetText(hostKeyText(""))
 		})
+		udpgwPort := entry("", "e.g. 7300 (badvpn-udpgw on the server); empty = no UDP")
+		if p.UDPGWPort > 0 {
+			udpgwPort.SetText(strconv.Itoa(p.UDPGWPort))
+		}
+		udpgwDNS := widget.NewCheck("Enable UDPGW transparent DNS (this may override any set custom DNS server)", nil)
+		udpgwDNS.SetChecked(p.UDPGWDNS)
 		items = append(items,
 			widget.NewFormItem("Username", user),
 			widget.NewFormItem("Password", pass),
 			widget.NewFormItem("Private key", container.NewBorder(nil, nil, nil, browse, key)),
 			widget.NewFormItem("Host key", container.NewBorder(nil, nil, nil, resetHostKey, hostKeyLabel)),
+			widget.NewFormItem("UDPGW port", udpgwPort),
+			widget.NewFormItem("", udpgwDNS),
 		)
 		collect = append(collect, func(p *profile.Profile) {
 			p.User, p.Password = strings.TrimSpace(user.Text), pass.Text
 			p.PrivateKeyPath, p.HostKey = strings.TrimSpace(key.Text), hostKey
+			p.UDPGWPort, _ = strconv.Atoi(strings.TrimSpace(udpgwPort.Text))
+			p.UDPGWDNS = p.UDPGWPort > 0 && udpgwDNS.Checked
 		})
 
 	case profile.TypeVMess, profile.TypeVLESS:

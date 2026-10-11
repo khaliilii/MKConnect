@@ -42,7 +42,7 @@ echo "== build badvpn-udpgw"
 git clone -q --depth 1 https://github.com/ambrop72/badvpn.git /tmp/badvpn
 mkdir -p /tmp/badvpn/build && cd /tmp/badvpn/build
 cmake .. -DBUILD_NOTHING_BY_DEFAULT=1 -DBUILD_UDPGW=1 >/dev/null
-make -s udpgw/badvpn-udpgw 2>&1 | grep -v warning || true
+make -s 2>&1 | grep -v -i warning || true
 ls -l udpgw/badvpn-udpgw
 cd /src
 

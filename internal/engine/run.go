@@ -100,6 +100,9 @@ func Run(ctx context.Context, p profile.Profile, s profile.Settings, hooks Hooks
 		if h := gateway.Hint(s.ShareInterfaces); h != "" {
 			log.Printf("   %s", h)
 		}
+		for _, w := range gateway.Diagnose(s.ShareInterfaces, TUNName) {
+			log.Printf("   ⚠️  %s", w)
+		}
 	}
 
 	session := newSession(&shown, &s, engines[0])
@@ -108,6 +111,9 @@ func Run(ctx context.Context, p profile.Profile, s profile.Settings, hooks Hooks
 		log.Printf("   ⬇ inbound:  %s", in)
 	}
 	log.Printf("   ⬆ outbound: %s", session.Outbound)
+	if addrs := LANAddresses(&s); len(addrs) > 0 {
+		log.Printf("   🖧 other devices: %s proxy %s", session.ProxyProtocols(), strings.Join(addrs, ", "))
+	}
 	if hooks.OnStarted != nil {
 		hooks.OnStarted(session)
 	}

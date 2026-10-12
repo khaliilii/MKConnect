@@ -210,7 +210,7 @@ fun AccountsScreen(
     var menuFor by remember { mutableStateOf<Account?>(null) }
     var showPaste by remember { mutableStateOf(false) }
     val state = status.optString("state")
-    val connected = state == "connected" || state == "connecting"
+    val connected = state == "connected" || state == "connecting" || state == "reconnecting"
 
     Column(Modifier.fillMaxSize()) {
         Row(Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 4.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -261,10 +261,21 @@ fun AccountsScreen(
         // Status and the Connect button, always at hand.
         Surface(tonalElevation = 3.dp) {
             Column(Modifier.fillMaxWidth().padding(12.dp), horizontalAlignment = Alignment.CenterHorizontally) {
-                val text = when (state) {
-                    "connected" -> "Connected to ${status.optString("profile")} · ↑ ${status.optString("up_text")} ↓ ${status.optString("down_text")}"
-                    "connecting" -> "Connecting…"
-                    "error" -> "Error: ${status.optString("error")}"
+                // The health check says whether traffic really gets through; a core
+                // that runs while nothing does should not look simply "Connected".
+                val health = status.optString("health")
+                val latency = status.optLong("health_ms")
+                val text = when {
+                    state == "connected" && health.isNotEmpty() ->
+                        "Connected to ${status.optString("profile")}, but no internet: $health"
+                    state == "connected" -> {
+                        val speed = "↑ ${status.optString("up_text")} ↓ ${status.optString("down_text")}"
+                        val ms = if (latency > 0) " · $latency ms" else ""
+                        "Connected to ${status.optString("profile")}$ms · $speed"
+                    }
+                    state == "connecting" -> "Connecting…"
+                    state == "reconnecting" -> "Connection lost; reconnecting…"
+                    state == "error" -> "Error: ${status.optString("error")}"
                     else -> "Disconnected"
                 }
                 Text(text, style = MaterialTheme.typography.bodyMedium, maxLines = 2, overflow = TextOverflow.Ellipsis)

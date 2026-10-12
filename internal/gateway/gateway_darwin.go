@@ -33,3 +33,29 @@ func hint(shared []string) string {
 		strings.Join(gatewayAddrs(shared), ", ") + ") and a public DNS server such as 1.1.1.1. " +
 		"With macOS Internet Sharing on that interface they get the gateway automatically."
 }
+
+// diagnose checks the things that silently break sharing on macOS: IP
+// forwarding and a packet filter that drops forwarded packets.
+func diagnose(shared []string, _ string) []string {
+	var out []string
+	if v, err := exec.Command("sysctl", "-n", "net.inet.ip.forwarding").Output(); err == nil &&
+		strings.TrimSpace(string(v)) != "1" {
+		out = append(out, "IP forwarding is off: packets from the shared interfaces are dropped")
+	}
+	// pf is normally disabled on macOS; when something enabled it (a firewall,
+	// macOS Internet Sharing, another VPN) its rules decide whether forwarded
+	// packets live, which is worth saying before the user hunts elsewhere.
+	if v, err := exec.Command("pfctl", "-s", "info").Output(); err == nil &&
+		strings.Contains(string(v), "Status: Enabled") {
+		out = append(out, "the macOS packet filter (pf) is enabled: if devices can't reach the internet, "+
+			"check its rules with `sudo pfctl -s rules`")
+	}
+	for _, name := range shared {
+		if strings.HasPrefix(name, "bridge") {
+			continue // macOS Internet Sharing: it hands out addresses itself
+		}
+		out = append(out, "devices on "+name+" need this Mac as their gateway: set it by hand, or turn on "+
+			"System Settings → General → Sharing → Internet Sharing for that interface")
+	}
+	return out
+}

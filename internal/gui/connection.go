@@ -3,7 +3,6 @@ package gui
 import (
 	"context"
 	"fmt"
-	"net"
 	"runtime"
 	"slices"
 	"strconv"
@@ -411,13 +410,7 @@ func (u *ui) setState(st connState, name string) {
 
 // lanAddresses tells the user what other devices should enter as their proxy.
 func lanAddresses(s *profile.Settings) string {
-	var ips []string
-	addrs, _ := net.InterfaceAddrs()
-	for _, a := range addrs {
-		if ipnet, ok := a.(*net.IPNet); ok && ipnet.IP.To4() != nil && !ipnet.IP.IsLoopback() && !ipnet.IP.IsLinkLocalUnicast() {
-			ips = append(ips, net.JoinHostPort(ipnet.IP.String(), strconv.Itoa(s.ListenPort)))
-		}
-	}
+	ips := engine.LANAddresses(s)
 	if len(ips) == 0 {
 		return "No network address found."
 	}

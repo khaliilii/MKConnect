@@ -116,6 +116,27 @@ func Enable(shared []string, tunName string) (*Session, error) {
 	return s, nil
 }
 
+// Diagnose returns warnings about things that would stop devices on the
+// shared interfaces from reaching the internet: forwarding that is off, a
+// missing tunnel interface or a firewall that drops forwarded packets. It is
+// run after sharing is enabled, so a share that doesn't work says why.
+func Diagnose(shared []string, tunName string) []string {
+	if len(shared) == 0 {
+		return nil
+	}
+	var out []string
+	if ifaces, err := net.Interfaces(); err == nil {
+		tun := false
+		for _, ifc := range ifaces {
+			tun = tun || isTunnel(ifc)
+		}
+		if !tun {
+			out = append(out, "no tunnel interface is up: devices have nothing to be routed into")
+		}
+	}
+	return append(out, diagnose(shared, tunName)...)
+}
+
 // Hint tells the user how devices on the shared interfaces connect.
 func Hint(shared []string) string {
 	if len(shared) == 0 {

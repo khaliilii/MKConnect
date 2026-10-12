@@ -91,3 +91,30 @@ func newSession(p *profile.Profile, s *profile.Settings, primary Engine) *Sessio
 	}
 	return session
 }
+
+// ProxyProtocols names what the local proxy speaks: the built-in SSH client
+// and Xray serve SOCKS5 only, sing-box also HTTP.
+func (s *Session) ProxyProtocols() string {
+	if strings.HasPrefix(s.Core, profile.CoreSingBox) || s.Core == "external "+profile.CoreSingBox {
+		return "SOCKS5 + HTTP"
+	}
+	return "SOCKS5"
+}
+
+// LANAddresses returns the addresses other devices on the network can use as
+// their proxy, when LAN sharing is on.
+func LANAddresses(s *profile.Settings) []string {
+	if !s.AllowLAN {
+		return nil
+	}
+	addrs, _ := net.InterfaceAddrs()
+	var out []string
+	for _, a := range addrs {
+		n, ok := a.(*net.IPNet)
+		if !ok || n.IP.To4() == nil || n.IP.IsLoopback() || n.IP.IsLinkLocalUnicast() {
+			continue
+		}
+		out = append(out, net.JoinHostPort(n.IP.String(), strconv.Itoa(s.ListenPort)))
+	}
+	return out
+}

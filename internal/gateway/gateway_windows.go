@@ -73,3 +73,18 @@ func hint(shared []string) string {
 	return "Devices plugged into " + strings.Join(shared, ", ") +
 		" get an address automatically (192.168.137.x) and use the tunnel. Only one adapter can be shared."
 }
+
+// diagnose checks that Internet Connection Sharing is actually running: its
+// service is what forwards, NATs and hands out addresses to the devices.
+func diagnose(shared []string, _ string) []string {
+	var out []string
+	if err := powershell(`if ((Get-Service SharedAccess).Status -ne 'Running') { throw 'ICS service is not running' }`); err != nil {
+		out = append(out, "the Internet Connection Sharing service (SharedAccess) is not running: "+
+			"devices get no address and no internet")
+	}
+	for _, name := range shared {
+		out = append(out, "devices on "+name+" get an address automatically (192.168.137.x); "+
+			"they must not have a static one")
+	}
+	return out
+}

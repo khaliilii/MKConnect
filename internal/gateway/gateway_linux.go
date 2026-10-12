@@ -3,6 +3,7 @@ package gateway
 import (
 	"fmt"
 	"os"
+	"os/exec"
 	"strings"
 
 	"github.com/khaliilii/MKConnect/internal/recovery"
@@ -37,4 +38,22 @@ func hint(shared []string) string {
 	return "Devices on " + strings.Join(shared, ", ") + " must use this machine as their gateway (" +
 		strings.Join(gatewayAddrs(shared), ", ") + ") and a public DNS server such as 1.1.1.1, " +
 		"which is answered through the tunnel."
+}
+
+// diagnose checks what silently breaks sharing on Linux: forwarding, and the
+// nftables redirection sing-box installs for gateway mode.
+func diagnose(shared []string, _ string) []string {
+	var out []string
+	if v, err := os.ReadFile(ipForward); err == nil && strings.TrimSpace(string(v)) != "1" {
+		out = append(out, "IP forwarding is off: packets from the shared interfaces are dropped")
+	}
+	if v, err := exec.Command("nft", "list", "ruleset").Output(); err == nil &&
+		!strings.Contains(string(v), "sing-box") {
+		out = append(out, "sing-box installed no nftables rules: devices' traffic may not be redirected "+
+			"into the tunnel (is nftables available?)")
+	}
+	for _, name := range shared {
+		out = append(out, "devices on "+name+" need this machine as their gateway and a public DNS server")
+	}
+	return out
 }

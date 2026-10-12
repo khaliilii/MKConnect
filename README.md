@@ -15,13 +15,17 @@ A multi-account client for **SSH, VMess, VLESS, Trojan, Shadowsocks, Hysteria2 a
   - **external**: run your own `sing-box` or `xray` binary with the generated config
   - SSH accounts on the xray core use the built-in SSH client (auto-reconnect, keepalive)
 - **proxy** mode: SOCKS5 + HTTP on `127.0.0.1:1080` (SOCKS5 only for xray / built-in SSH)
-- **LAN sharing**: listen on all interfaces, optionally with a username/password, so other devices can use the proxy
+- **LAN sharing**: listen on all interfaces, optionally with a username/password, so other devices can use the
+  proxy; the log and the window show the exact addresses (e.g. `192.168.1.10:1080`) to enter on those devices
 - **tun** mode: a virtual network interface that routes the whole system through the tunnel (needs root / Administrator)
 - **gateway** (TUN mode, "Share with"): devices on other network interfaces (Ethernet, a second Wi-Fi, a hotspot)
   reach the internet through the tunnel without any proxy settings. TUN interfaces can't be bridged with Ethernet,
   so MKConnect acts as a router instead: Linux uses sing-box `auto_redirect` + IP forwarding, macOS IP forwarding,
   Windows Internet Connection Sharing (devices get 192.168.137.x automatically). Everything is undone on disconnect.
-  `scripts/test-gateway-linux.sh` checks it end to end with network namespaces.
+  `scripts/test-gateway-linux.sh` checks it end to end with network namespaces. When sharing is on, the log
+  says what the devices need (gateway address, DNS) and warns about what silently breaks it: IP forwarding
+  that is off, no tunnel interface, an enabled macOS packet filter, missing nftables rules on Linux or a
+  stopped Internet Connection Sharing service on Windows.
 - **SSH payload** (HTTP Injector / KPN Tunnel style): an HTTP request sent on the raw socket before the SSH
   handshake, so filters that only pass HTTP(S) traffic see a request to an allowed ("bug") host. Set it per
   account (**Payload** in the SSH form, `--payload` on the CLI, `payload=` in an `ssh://` link) with the tags
@@ -142,10 +146,11 @@ GitHub Actions builds these on every push and attaches them to a release for `v*
 | Android app (APK) | ✅ | ✅ | ✅ | ✅ |
 | CLI, Linux / Windows / macOS / Android | ✅ | ✅ | ✅ | ✅ (Linux) |
 
-On Android the app currently runs the proxy mode (local SOCKS/HTTP proxy, shareable over a hotspot);
-a system-wide VPN (TUN) on Android needs a VPN service and is on the roadmap.
+On Android the app runs either as a system-wide VPN (Android's own VpnService carries the TUN) or in proxy
+mode (a local SOCKS/HTTP proxy, shareable over a hotspot), chosen under **Mode**. Either way the connection is
+checked the same as on the desktop: the status line reports the latency when traffic gets through, says so when
+it doesn't, and reconnects by itself.
 
 ## Roadmap
 
 - Hotspot helpers
-- Android app with a background VPN service

@@ -9,3 +9,5 @@ func enable(*Session, []string, string) error {
 }
 
 func hint([]string) string { return "" }
+
+func diagnose([]string, string) []string { return nil }

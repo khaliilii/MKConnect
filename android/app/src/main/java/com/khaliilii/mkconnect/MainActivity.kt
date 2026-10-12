@@ -198,7 +198,23 @@ fun App(onConnect: (Boolean) -> Unit, onDisconnect: () -> Unit, clipboardText: (
     }
 
     val actions = AccountActions(
-        select = { a -> Mkmobile.setActive(a.id); refresh() },
+        select = { a ->
+            Mkmobile.setActive(a.id)
+            refresh()
+            // Picking another account while connected switches to it, as the
+            // desktop app does.
+            if (status.busy) {
+                onDisconnect()
+                scope.launch {
+                    var waited = 0
+                    while (waited < 10_000 && loadStatus().state != "idle") {
+                        delay(250)
+                        waited += 250
+                    }
+                    onConnect(settings.vpnMode)
+                }
+            }
+        },
         edit = { a -> editing = a.id },
         share = { a ->
             runCatching { Mkmobile.shareLink(a.id) }

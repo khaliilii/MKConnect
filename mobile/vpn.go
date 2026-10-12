@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
+	"log"
 	"net/url"
 	"os"
 	"path/filepath"
@@ -82,8 +84,28 @@ const (
 	healthFailsToRetry = 2
 )
 
-// SetDataDir sets where logs are written (the app's files directory).
-func SetDataDir(dir string) { dataDir = dir }
+// SetDataDir sets where logs are written (the app's files directory) and
+// sends this package's own log output to the same file, so the app's log
+// screen shows the connection's messages (health checks, reconnects) and not
+// only sing-box's.
+func SetDataDir(dir string) {
+	dataDir = dir
+	path := filepath.Join(dir, "core.log")
+	f, err := os.OpenFile(path, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o600)
+	if err != nil {
+		return
+	}
+	log.SetFlags(log.Ldate | log.Ltime)
+	log.SetOutput(io.MultiWriter(f, os.Stderr)) // os.Stderr is Android's logcat
+}
+
+// ClearLogs empties the log file.
+func ClearLogs() {
+	if dataDir == "" {
+		return
+	}
+	os.Truncate(filepath.Join(dataDir, "core.log"), 0)
+}
 
 // Start connects the active account. With a platform it runs as the
 // system VPN (unless the phone mode is "proxy"); without one only the local
@@ -116,7 +138,9 @@ func Start(app Platform) error {
 	logFile := ""
 	if dataDir != "" {
 		logFile = filepath.Join(dataDir, "core.log")
-		os.Remove(logFile)
+		// Truncate rather than remove: this package's own log output holds the
+		// file open, and a removed file would take those messages with it.
+		os.Truncate(logFile, 0)
 	}
 	cfg, err := engine.MobileConfig(prof, settings, vpn, logFile)
 	if err != nil {

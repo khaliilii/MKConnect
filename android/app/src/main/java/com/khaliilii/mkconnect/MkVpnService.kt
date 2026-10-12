@@ -54,8 +54,7 @@ class MkVpnService : VpnService(), Platform {
         thread(name = "mkconnect-start") {
             try {
                 Mkmobile.start(if (vpn) this else null)
-                val status = JSONObject(Mkmobile.status())
-                updateNotification("Connected to ${status.optString("profile")}")
+                watchStatus()
             } catch (e: Exception) {
                 Log.e(TAG, "start failed", e)
                 lastError = e.message
@@ -64,7 +63,27 @@ class MkVpnService : VpnService(), Platform {
         }
     }
 
+    // The notification follows the connection, so the shade shows the same
+    // thing the app does: the latency, "no internet" or a reconnect.
+    private fun watchStatus() {
+        watching = true
+        thread(name = "mkconnect-status") {
+            var shown = ""
+            while (watching) {
+                val status = runCatching { loadStatus() }.getOrNull()
+                if (status == null || !status.busy) break
+                val text = status.text()
+                if (text != shown) {
+                    shown = text
+                    updateNotification(text)
+                }
+                Thread.sleep(5000)
+            }
+        }
+    }
+
     private fun stop() {
+        watching = false
         thread(name = "mkconnect-stop") {
             try {
                 Mkmobile.stop()
@@ -180,6 +199,9 @@ class MkVpnService : VpnService(), Platform {
         cm.registerDefaultNetworkCallback(callback)
         networkCallback = callback
     }
+
+    @Volatile
+    private var watching = false
 
     private fun notification(text: String): Notification {
         val open = PendingIntent.getActivity(

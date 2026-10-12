@@ -12,26 +12,54 @@ import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
-import androidx.compose.foundation.ExperimentalFoundationApi
-import androidx.compose.foundation.background
-import androidx.compose.foundation.combinedClickable
-import androidx.compose.foundation.layout.*
-import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.text.KeyboardOptions
-import androidx.compose.foundation.verticalScroll
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxHeight
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.statusBarsPadding
+import androidx.compose.foundation.layout.width
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.*
-import androidx.compose.material3.*
-import androidx.compose.runtime.*
+import androidx.compose.material.icons.filled.Description
+import androidx.compose.material.icons.filled.Info
+import androidx.compose.material.icons.filled.List
+import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material.icons.filled.Settings
+import androidx.compose.material.icons.filled.Stop
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.NavigationBar
+import androidx.compose.material3.NavigationBarItem
+import androidx.compose.material3.NavigationRail
+import androidx.compose.material3.NavigationRailItem
+import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Surface
+import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
+import androidx.compose.material3.VerticalDivider
+import androidx.compose.material3.darkColorScheme
+import androidx.compose.material3.lightColorScheme
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.text.font.FontFamily
-import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.input.KeyboardType
-import androidx.compose.ui.text.input.PasswordVisualTransformation
+import androidx.compose.ui.platform.LocalClipboardManager
+import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -99,53 +127,57 @@ class MainActivity : ComponentActivity() {
             android.content.res.Configuration.UI_MODE_NIGHT_YES
 }
 
-// ---------- data ----------
+// ---------- the app shell ----------
+//
+// One pane with a bottom bar on a phone; from a tablet's width (or a phone in
+// landscape) a navigation rail and two panes, with the account list and the
+// connect button always visible next to the settings or the log.
 
-data class Account(val id: String, val name: String, val type: String, val summary: String, val group: String)
-data class Group(val id: String, val name: String, val url: String, val count: Int, val usedText: String, val used: Long, val total: Long, val expire: Long)
-data class Accounts(val active: String, val list: List<Account>, val groups: List<Group>)
-
-fun loadAccounts(): Accounts {
-    val o = JSONObject(Mkmobile.profiles())
-    val ps = o.getJSONArray("profiles")
-    val gs = o.getJSONArray("groups")
-    return Accounts(
-        active = o.optString("active"),
-        list = (0 until ps.length()).map { ps.getJSONObject(it) }.map {
-            Account(it.getString("id"), it.getString("name"), it.getString("type"), it.getString("summary"), it.optString("group"))
-        },
-        groups = (0 until gs.length()).map { gs.getJSONObject(it) }.map {
-            val usage = it.optJSONObject("usage")
-            Group(
-                it.getString("id"), it.getString("name"), it.optString("url"), it.optInt("count"), it.optString("used_text"),
-                (usage?.optLong("upload") ?: 0) + (usage?.optLong("download") ?: 0), usage?.optLong("total") ?: 0,
-                0,
-            )
-        },
-    )
-}
-
-// ---------- UI ----------
+private const val TAB_ACCOUNTS = 0
+private const val TAB_SETTINGS = 1
+private const val TAB_LOGS = 2
 
 @Composable
 fun App(onConnect: (Boolean) -> Unit, onDisconnect: () -> Unit, clipboardText: () -> String, openUrl: (String) -> Unit) {
-    var tab by remember { mutableIntStateOf(0) }
+    var tab by remember { mutableIntStateOf(TAB_ACCOUNTS) }
     var accounts by remember { mutableStateOf(loadAccounts()) }
-    var status by remember { mutableStateOf(JSONObject(Mkmobile.status())) }
+    var settings by remember { mutableStateOf(loadSettings()) }
+    var status by remember { mutableStateOf(loadStatus()) }
+    var test by remember { mutableStateOf(loadTestRun()) }
     var message by remember { mutableStateOf<String?>(null) }
     var showAbout by remember { mutableStateOf(false) }
+    var editing by remember { mutableStateOf<String?>(null) } // account id; "" = a new account
+    var showImport by remember { mutableStateOf(false) }
+    var newGroup by remember { mutableStateOf(false) }
+    var renaming by remember { mutableStateOf<Group?>(null) }
+    var moving by remember { mutableStateOf<Account?>(null) }
+    val options = remember { Options.load() }
+    val clipboard = LocalClipboardManager.current
     val scope = rememberCoroutineScope()
 
+    fun refresh() {
+        accounts = loadAccounts()
+        settings = loadSettings()
+    }
+
     LaunchedEffect(Unit) {
+        var wasTesting = false
         while (true) {
-            status = JSONObject(Mkmobile.status())
+            status = loadStatus()
+            test = loadTestRun()
+            if (wasTesting && !test.running) refresh() // the measurements were saved
+            wasTesting = test.running
             MkVpnService.lastError?.let { message = it; MkVpnService.lastError = null }
             delay(1000)
         }
     }
-    fun refresh() { accounts = loadAccounts() }
-    fun import(text: String) = scope.launch {
-        val result = withContext(Dispatchers.IO) { runCatching { JSONObject(Mkmobile.import_(text)) } }
+
+    fun import(text: String, group: String) = scope.launch {
+        val result = withContext(Dispatchers.IO) {
+            runCatching {
+                JSONObject(if (group.isEmpty()) Mkmobile.import_(text) else Mkmobile.importInto(text, group))
+            }
+        }
         result.onSuccess {
             val skipped = it.getJSONArray("skipped")
             message = buildString {
@@ -157,246 +189,193 @@ fun App(onConnect: (Boolean) -> Unit, onDisconnect: () -> Unit, clipboardText: (
         }.onFailure { message = it.message }
     }
 
-    Scaffold(
-        topBar = {
-            Row(
-                Modifier.fillMaxWidth().statusBarsPadding().padding(horizontal = 16.dp, vertical = 8.dp),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                Text("MKConnect", style = MaterialTheme.typography.titleLarge, modifier = Modifier.weight(1f))
-                IconButton(onClick = { showAbout = true }) { Icon(Icons.Filled.Info, "About") }
-            }
+    // Like the desktop app: add links copied while the app was in the background.
+    LaunchedEffect(settings.clipboardImport) {
+        if (settings.clipboardImport) {
+            val text = clipboardText()
+            if (text.contains("://")) import(text, "")
+        }
+    }
+
+    val actions = AccountActions(
+        select = { a -> Mkmobile.setActive(a.id); refresh() },
+        edit = { a -> editing = a.id },
+        share = { a ->
+            runCatching { Mkmobile.shareLink(a.id) }
+                .onSuccess { clipboard.setText(AnnotatedString(it)); message = "Share link copied." }
+                .onFailure { message = it.message }
         },
-        bottomBar = {
-            NavigationBar {
-                NavigationBarItem(tab == 0, { tab = 0 }, { Icon(Icons.Filled.List, null) }, label = { Text("Accounts") })
-                NavigationBarItem(tab == 1, { tab = 1 }, { Icon(Icons.Filled.Settings, null) }, label = { Text("Settings") })
-                NavigationBarItem(tab == 2, { tab = 2 }, { Icon(Icons.Filled.Description, null) }, label = { Text("Logs") })
-            }
+        delete = { a ->
+            runCatching { Mkmobile.delete(a.id) }.onFailure { message = it.message }
+            refresh()
         },
-    ) { padding ->
-        Box(Modifier.padding(padding).fillMaxSize()) {
-            when (tab) {
-                0 -> AccountsScreen(accounts, status, ::refresh, { import(clipboardText()) }, ::import, onConnect, onDisconnect,
+        test = { a ->
+            runCatching { Mkmobile.startTest(a.id, false) }.onFailure { message = it.message }
+            test = loadTestRun()
+        },
+        move = { a -> moving = a },
+    )
+
+    BoxWithConstraints(Modifier.fillMaxSize()) {
+        val wide = maxWidth >= 720.dp
+        val tabs = listOf(
+            Triple(TAB_ACCOUNTS, "Accounts", Icons.Filled.List),
+            Triple(TAB_SETTINGS, "Connection", Icons.Filled.Settings),
+            Triple(TAB_LOGS, "Logs", Icons.Filled.Description),
+        )
+
+        Scaffold(
+            topBar = {
+                Row(
+                    Modifier.fillMaxWidth().statusBarsPadding().padding(horizontal = 16.dp, vertical = 8.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Text("MKConnect", style = MaterialTheme.typography.titleLarge, modifier = Modifier.weight(1f))
+                    IconButton(onClick = { showAbout = true }) { Icon(Icons.Filled.Info, "About") }
+                }
+            },
+            bottomBar = {
+                if (!wide) {
+                    NavigationBar {
+                        tabs.forEach { (index, label, icon) ->
+                            NavigationBarItem(tab == index, { tab = index }, { Icon(icon, null) }, label = { Text(label) })
+                        }
+                    }
+                }
+            },
+        ) { padding ->
+            val accountsPane: @Composable () -> Unit = {
+                AccountsScreen(
+                    accounts = accounts,
+                    test = test,
+                    sortBy = settings.sortBy,
+                    actions = actions,
+                    onImportClipboard = { import(clipboardText(), "") },
+                    onShowImport = { showImport = true },
+                    onNewAccount = { editing = "" },
                     onUpdateSubs = {
                         scope.launch {
                             val n = withContext(Dispatchers.IO) { runCatching { Mkmobile.updateSubscriptions() } }
                             message = n.fold({ "Updated $it subscription(s)." }, { it.message })
                             refresh()
                         }
-                    })
-                1 -> SettingsScreen { message = it }
-                2 -> LogsScreen()
-            }
-        }
-    }
-
-    message?.let { AlertDialog(onDismissRequest = { message = null }, confirmButton = { TextButton({ message = null }) { Text("OK") } }, text = { Text(it) }) }
-    if (showAbout) AboutDialog(onClose = { showAbout = false }, openUrl = openUrl)
-}
-
-@OptIn(ExperimentalFoundationApi::class)
-@Composable
-fun AccountsScreen(
-    accounts: Accounts,
-    status: JSONObject,
-    refresh: () -> Unit,
-    importClipboard: () -> Unit,
-    importText: (String) -> Unit,
-    onConnect: (Boolean) -> Unit,
-    onDisconnect: () -> Unit,
-    onUpdateSubs: () -> Unit,
-) {
-    var menuFor by remember { mutableStateOf<Account?>(null) }
-    var showPaste by remember { mutableStateOf(false) }
-    val state = status.optString("state")
-    val connected = state == "connected" || state == "connecting" || state == "reconnecting"
-
-    Column(Modifier.fillMaxSize()) {
-        Row(Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 4.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            Button(onClick = importClipboard, modifier = Modifier.weight(1f)) {
-                Icon(Icons.Filled.ContentPaste, null); Spacer(Modifier.width(6.dp)); Text("Clipboard")
-            }
-            OutlinedButton(onClick = { showPaste = true }, modifier = Modifier.weight(1f)) {
-                Icon(Icons.Filled.Add, null); Spacer(Modifier.width(6.dp)); Text("Add")
-            }
-            if (accounts.groups.any { it.url.isNotEmpty() }) {
-                IconButton(onClick = onUpdateSubs) { Icon(Icons.Filled.Refresh, "Update subscriptions") }
-            }
-        }
-        accounts.groups.filter { it.url.isNotEmpty() && it.usedText.isNotEmpty() }.forEach { g ->
-            Card(Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 4.dp)) {
-                Column(Modifier.padding(12.dp)) {
-                    Text(g.name, fontWeight = FontWeight.Bold)
-                    if (g.total > 0) LinearProgressIndicator(
-                        progress = { (g.used.toFloat() / g.total).coerceIn(0f, 1f) },
-                        modifier = Modifier.fillMaxWidth().padding(vertical = 6.dp),
-                    )
-                    Text("${g.usedText} · ${g.count} accounts", style = MaterialTheme.typography.bodySmall)
-                }
-            }
-        }
-        if (accounts.list.isEmpty()) {
-            Box(Modifier.weight(1f).fillMaxWidth(), contentAlignment = Alignment.Center) {
-                Text("No accounts yet.\nCopy a share link or subscription URL\nand tap Clipboard.", style = MaterialTheme.typography.bodyMedium)
-            }
-        } else {
-            LazyColumn(Modifier.weight(1f)) {
-                items(accounts.list, key = { it.id }) { a ->
-                    val selected = a.id == accounts.active
-                    Column(
-                        Modifier.fillMaxWidth()
-                            .background(if (selected) MaterialTheme.colorScheme.primaryContainer else Color.Transparent)
-                            .combinedClickable(onClick = { Mkmobile.setActive(a.id); refresh() }, onLongClick = { menuFor = a })
-                            .padding(horizontal = 16.dp, vertical = 10.dp),
-                    ) {
-                        Text(a.name, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                        Text(a.summary, style = MaterialTheme.typography.bodySmall, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                    }
-                    HorizontalDivider()
-                }
-            }
-        }
-
-        // Status and the Connect button, always at hand.
-        Surface(tonalElevation = 3.dp) {
-            Column(Modifier.fillMaxWidth().padding(12.dp), horizontalAlignment = Alignment.CenterHorizontally) {
-                // The health check says whether traffic really gets through; a core
-                // that runs while nothing does should not look simply "Connected".
-                val health = status.optString("health")
-                val latency = status.optLong("health_ms")
-                val text = when {
-                    state == "connected" && health.isNotEmpty() ->
-                        "Connected to ${status.optString("profile")}, but no internet: $health"
-                    state == "connected" -> {
-                        val speed = "↑ ${status.optString("up_text")} ↓ ${status.optString("down_text")}"
-                        val ms = if (latency > 0) " · $latency ms" else ""
-                        "Connected to ${status.optString("profile")}$ms · $speed"
-                    }
-                    state == "connecting" -> "Connecting…"
-                    state == "reconnecting" -> "Connection lost; reconnecting…"
-                    state == "error" -> "Error: ${status.optString("error")}"
-                    else -> "Disconnected"
-                }
-                Text(text, style = MaterialTheme.typography.bodyMedium, maxLines = 2, overflow = TextOverflow.Ellipsis)
-                Spacer(Modifier.height(8.dp))
-                Button(
-                    onClick = {
-                        if (connected) onDisconnect()
-                        else onConnect(JSONObject(Mkmobile.settings()).optString("mode") != "proxy")
                     },
-                    enabled = connected || accounts.active.isNotEmpty(),
-                    colors = if (connected) ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error) else ButtonDefaults.buttonColors(),
-                    modifier = Modifier.fillMaxWidth().height(52.dp),
-                ) {
-                    Icon(if (connected) Icons.Filled.Stop else Icons.Filled.PlayArrow, null)
-                    Spacer(Modifier.width(8.dp))
-                    Text(if (connected) "Disconnect" else "Connect", fontSize = 18.sp)
+                    onStartTest = { speed ->
+                        runCatching { Mkmobile.startTest("", speed) }.onFailure { message = it.message }
+                        test = loadTestRun()
+                    },
+                    onCancelTest = { Mkmobile.cancelTest() },
+                    onSortBy = { value ->
+                        runCatching { Mkmobile.setSettings(settings.copy(sortBy = value).toJson()) }
+                            .onFailure { message = it.message }
+                        refresh()
+                    },
+                    onNewGroup = { newGroup = true },
+                    onRenameGroup = { g -> renaming = g },
+                    onDeleteGroup = { g ->
+                        runCatching { Mkmobile.deleteGroup(g.id) }.onFailure { message = it.message }
+                        refresh()
+                    },
+                )
+            }
+            val settingsPane: @Composable () -> Unit = {
+                SettingsScreen(options, status, { message = it }, { refresh() })
+            }
+            val connectBar: @Composable () -> Unit = {
+                Surface(tonalElevation = 3.dp) {
+                    Column(Modifier.fillMaxWidth().padding(12.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+                        Text(
+                            status.text(),
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = if (status.warning) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurface,
+                            maxLines = 2,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                        Spacer(Modifier.height(8.dp))
+                        Button(
+                            onClick = { if (status.busy) onDisconnect() else onConnect(settings.vpnMode) },
+                            enabled = status.busy || accounts.active.isNotEmpty(),
+                            colors = if (status.busy) {
+                                ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error)
+                            } else {
+                                ButtonDefaults.buttonColors()
+                            },
+                            modifier = Modifier.fillMaxWidth().height(52.dp),
+                        ) {
+                            Icon(if (status.busy) Icons.Filled.Stop else Icons.Filled.PlayArrow, null)
+                            Spacer(Modifier.width(8.dp))
+                            Text(if (status.busy) "Disconnect" else "Connect", fontSize = 18.sp)
+                        }
+                    }
+                }
+            }
+
+            Row(Modifier.padding(padding).fillMaxSize()) {
+                if (wide) {
+                    NavigationRail {
+                        tabs.forEach { (index, label, icon) ->
+                            NavigationRailItem(tab == index, { tab = index }, { Icon(icon, null) }, label = { Text(label) })
+                        }
+                    }
+                    Column(Modifier.weight(0.42f).fillMaxHeight()) {
+                        Box(Modifier.weight(1f)) { accountsPane() }
+                        connectBar()
+                    }
+                    VerticalDivider()
+                    Box(Modifier.weight(0.58f).fillMaxHeight()) {
+                        if (tab == TAB_LOGS) LogsScreen() else settingsPane()
+                    }
+                } else {
+                    Column(Modifier.fillMaxSize()) {
+                        Box(Modifier.weight(1f)) {
+                            when (tab) {
+                                TAB_ACCOUNTS -> accountsPane()
+                                TAB_SETTINGS -> settingsPane()
+                                else -> LogsScreen()
+                            }
+                        }
+                        if (tab != TAB_LOGS) connectBar()
+                    }
                 }
             }
         }
     }
 
-    menuFor?.let { a ->
+    message?.let {
         AlertDialog(
-            onDismissRequest = { menuFor = null },
-            title = { Text(a.name) },
-            text = { Text(a.summary) },
-            confirmButton = {
-                TextButton({
-                    Mkmobile.delete(a.id); refresh(); menuFor = null
-                }) { Text("Delete") }
-            },
-            dismissButton = { TextButton({ menuFor = null }) { Text("Close") } },
+            onDismissRequest = { message = null },
+            confirmButton = { TextButton({ message = null }) { Text("OK") } },
+            text = { Text(it) },
         )
     }
-    if (showPaste) {
-        var text by remember { mutableStateOf("") }
-        AlertDialog(
-            onDismissRequest = { showPaste = false },
-            title = { Text("Add accounts") },
-            text = {
-                OutlinedTextField(
-                    value = text, onValueChange = { text = it },
-                    placeholder = { Text("vmess://, vless://, trojan://, ss://, hy2://, tuic://, ssh:// links or a subscription URL") },
-                    modifier = Modifier.fillMaxWidth().heightIn(min = 140.dp),
-                )
-            },
-            confirmButton = { TextButton({ importText(text); showPaste = false }) { Text("Import") } },
-            dismissButton = { TextButton({ showPaste = false }) { Text("Cancel") } },
-        )
-    }
-}
-
-@Composable
-fun SettingsScreen(onMessage: (String) -> Unit) {
-    val initial = remember { JSONObject(Mkmobile.settings()) }
-    var vpn by remember { mutableStateOf(initial.optString("mode") != "proxy") }
-    var port by remember { mutableStateOf(initial.optInt("port", 1080).toString()) }
-    var lan by remember { mutableStateOf(initial.optBoolean("allow_lan")) }
-    var user by remember { mutableStateOf(initial.optString("proxy_user")) }
-    var pass by remember { mutableStateOf(initial.optString("proxy_pass")) }
-    var dns by remember { mutableStateOf(initial.optString("remote_dns", "1.1.1.1")) }
-    var ipv6 by remember { mutableStateOf(initial.optBoolean("ipv6")) }
-
-    fun save() {
-        val json = JSONObject().apply {
-            put("mode", if (vpn) "vpn" else "proxy")
-            put("port", port.toIntOrNull() ?: 1080)
-            put("allow_lan", lan)
-            put("proxy_user", user)
-            put("proxy_pass", pass)
-            put("remote_dns", dns)
-            put("ipv6", ipv6)
-        }
-        runCatching { Mkmobile.setSettings(json.toString()) }.onFailure { onMessage(it.message ?: "invalid settings") }
-    }
-
-    Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-        Text("Mode", fontWeight = FontWeight.Bold)
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            RadioButton(vpn, { vpn = true; save() }); Text("VPN (all apps)")
-            Spacer(Modifier.width(16.dp))
-            RadioButton(!vpn, { vpn = false; save() }); Text("Proxy only")
-        }
-        Text(
-            if (vpn) "All apps go through the tunnel (Android asks for VPN permission the first time)."
-            else "Only apps set to use the local proxy go through the tunnel.",
-            style = MaterialTheme.typography.bodySmall,
-        )
-        HorizontalDivider()
-        OutlinedTextField(port, { port = it; save() }, label = { Text("Local proxy port") },
-            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number), modifier = Modifier.fillMaxWidth())
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Switch(lan, { lan = it; save() }); Spacer(Modifier.width(8.dp))
-            Text("Share the proxy with other devices (e.g. over this phone's hotspot)")
-        }
-        OutlinedTextField(user, { user = it; save() }, label = { Text("Proxy user (optional)") }, modifier = Modifier.fillMaxWidth())
-        OutlinedTextField(pass, { pass = it; save() }, label = { Text("Proxy password (optional)") },
-            visualTransformation = PasswordVisualTransformation(), modifier = Modifier.fillMaxWidth())
-        OutlinedTextField(dns, { dns = it; save() }, label = { Text("DNS through the tunnel") }, modifier = Modifier.fillMaxWidth())
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Switch(ipv6, { ipv6 = it; save() }); Spacer(Modifier.width(8.dp))
-            Text("IPv6 through the tunnel (only if the server has IPv6)")
-        }
-        Text("Changes apply on the next connect.", style = MaterialTheme.typography.bodySmall)
-    }
-}
-
-@Composable
-fun LogsScreen() {
-    var logs by remember { mutableStateOf("") }
-    LaunchedEffect(Unit) {
-        while (true) {
-            logs = withContext(Dispatchers.IO) { Mkmobile.logs(300) }
-            delay(2000)
+    editing?.let { id ->
+        EditorDialog(id, options, onClose = { editing = null }) { msg ->
+            message = msg
+            refresh()
         }
     }
-    Text(
-        logs.ifEmpty { "No logs yet. Connect to see the core's log." },
-        fontFamily = FontFamily.Monospace, fontSize = 11.sp,
-        modifier = Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(12.dp),
-    )
+    if (showImport) {
+        ImportDialog(onClose = { showImport = false }) { text, group -> import(text, group) }
+    }
+    if (newGroup) {
+        PromptDialog("New group", "Name", "", onClose = { newGroup = false }) { name ->
+            runCatching { Mkmobile.addGroup(name) }.onFailure { message = it.message }
+            refresh()
+        }
+    }
+    renaming?.let { g ->
+        PromptDialog("Rename group", "Name", g.name, onClose = { renaming = null }) { name ->
+            runCatching { Mkmobile.renameGroup(g.id, name) }.onFailure { message = it.message }
+            refresh()
+        }
+    }
+    moving?.let { a ->
+        GroupPickerDialog(accounts.groups, onClose = { moving = null }) { groupId ->
+            runCatching { Mkmobile.setGroup(a.id, groupId) }.onFailure { message = it.message }
+            refresh()
+        }
+    }
+    if (showAbout) AboutDialog(onClose = { showAbout = false }, openUrl = openUrl)
 }
 
 @Composable
@@ -408,7 +387,12 @@ fun AboutDialog(onClose: () -> Unit, openUrl: (String) -> Unit) {
             Column {
                 Text("Version ${Mkmobile.version()}")
                 Spacer(Modifier.height(8.dp))
-                Text("SSH, VMess, VLESS, Trojan, Shadowsocks, Hysteria2 and TUIC client.")
+                Text("SSH (with HTTP payload), VMess, VLESS, Trojan, Shadowsocks, Hysteria2 and TUIC client.")
+                Spacer(Modifier.height(4.dp))
+                Text(
+                    "Accounts, groups and subscriptions, server tests, a system-wide VPN or a local proxy to share.",
+                    style = MaterialTheme.typography.bodySmall,
+                )
                 Spacer(Modifier.height(12.dp))
                 Text("Developed by")
                 TextButton({ openUrl("https://github.com/khaliilii") }) { Text("github.com/khaliilii") }

@@ -52,6 +52,10 @@ type profileView struct {
 	Type    string `json:"type"`
 	Summary string `json:"summary"`
 	Group   string `json:"group,omitempty"`
+	// The last measurement, so the list can show and sort by it.
+	Test    string `json:"test,omitempty"`    // "182 ms · 3/3 · 4.2 MB/s" or "failed"
+	TestOK  bool   `json:"test_ok,omitempty"` // the server answered
+	Latency int    `json:"latency_ms,omitempty"`
 }
 
 type groupView struct {
@@ -77,8 +81,20 @@ func Profiles() (string, error) {
 		Profiles []profileView `json:"profiles"`
 		Groups   []groupView   `json:"groups"`
 	}{Active: s.Active, Profiles: []profileView{}, Groups: []groupView{}}
-	for _, p := range s.Profiles {
-		out.Profiles = append(out.Profiles, profileView{ID: p.ID, Name: p.Name, Type: p.Type, Summary: summary(&p), Group: p.Group})
+	// Show them in the configured order (as added, by latency or by speed),
+	// like the desktop list.
+	order := make([]int, len(s.Profiles))
+	for i := range order {
+		order[i] = i
+	}
+	profile.SortProfiles(s.Profiles, order, s.Settings.SortBy)
+	for _, i := range order {
+		p := s.Profiles[i]
+		v := profileView{ID: p.ID, Name: p.Name, Type: p.Type, Summary: summary(&p), Group: p.Group}
+		if p.Test != nil {
+			v.Test, v.TestOK, v.Latency = p.Test.Summary(), p.Test.OK(), p.Test.Latency
+		}
+		out.Profiles = append(out.Profiles, v)
 	}
 	for _, g := range s.Groups {
 		v := groupView{ID: g.ID, Name: g.Name, URL: g.URL, Count: s.GroupSize(g.ID), Usage: g.Usage}
@@ -288,7 +304,9 @@ func ShareLink(id string) (string, error) {
 	return p.Link(), nil
 }
 
-// mobileSettings is the subset of settings the phone app exposes.
+// mobileSettings is what the phone app can change; it covers the desktop
+// settings that apply to a phone (the core is always sing-box, which carries
+// every protocol, and interface sharing needs root).
 type mobileSettings struct {
 	Mode      string `json:"mode"` // vpn or proxy
 	Port      int    `json:"port"`
@@ -297,6 +315,15 @@ type mobileSettings struct {
 	ProxyPass string `json:"proxy_pass"`
 	RemoteDNS string `json:"remote_dns"`
 	IPv6      bool   `json:"ipv6"`
+
+	LogLevel      string `json:"log_level"`
+	AutoReconnect bool   `json:"auto_reconnect"`
+	SortBy        string `json:"sort_by"`
+	TUNStack      string `json:"tun_stack"`
+	TUNMTU        int    `json:"tun_mtu"`
+	// ClipboardImport makes the app add share links it finds on the clipboard
+	// when it comes to the foreground.
+	ClipboardImport bool `json:"clipboard_import"`
 }
 
 // Settings returns the phone settings as JSON.
@@ -313,7 +340,9 @@ func Settings() (string, error) {
 		mode = "vpn"
 	}
 	data, _ := json.Marshal(mobileSettings{Mode: mode, Port: st.ListenPort, AllowLAN: st.AllowLAN,
-		ProxyUser: st.ProxyUser, ProxyPass: st.ProxyPass, RemoteDNS: st.RemoteDNS, IPv6: st.IPv6})
+		ProxyUser: st.ProxyUser, ProxyPass: st.ProxyPass, RemoteDNS: st.RemoteDNS, IPv6: st.IPv6,
+		LogLevel: st.LogLevel, AutoReconnect: st.AutoReconnect, SortBy: st.SortBy,
+		TUNStack: st.TUNStack, TUNMTU: st.TUNMTU, ClipboardImport: st.ClipboardImport})
 	return string(data), nil
 }
 
@@ -331,8 +360,13 @@ func SetSettings(data string) error {
 	}
 	st := s.Settings
 	st.ListenPort, st.AllowLAN, st.ProxyUser, st.ProxyPass, st.IPv6 = in.Port, in.AllowLAN, in.ProxyUser, in.ProxyPass, in.IPv6
+	st.AutoReconnect, st.SortBy, st.ClipboardImport = in.AutoReconnect, in.SortBy, in.ClipboardImport
+	st.TUNStack, st.TUNMTU = in.TUNStack, in.TUNMTU
 	if in.RemoteDNS != "" {
 		st.RemoteDNS = in.RemoteDNS
+	}
+	if in.LogLevel != "" {
+		st.LogLevel = in.LogLevel
 	}
 	st.Core = profile.CoreSingBox // the VPN runs sing-box; it covers every protocol
 	if err := st.Validate(); err != nil {

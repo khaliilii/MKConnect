@@ -46,15 +46,17 @@ func TestRenderPayloadKeepsUnknownTags(t *testing.T) {
 	}
 }
 
-// payloadServer accepts one connection, checks the injected request and then
-// relays the rest to target, so an SSH session can run on top of it.
-func payloadServer(t *testing.T, target string, reply string, check func(string)) string {
+// payloadServer accepts connections, reports each injected request on the
+// returned channel and relays the rest to target, so an SSH session can run
+// on top of it.
+func payloadServer(t *testing.T, target string, reply string) (addr string, requests <-chan string) {
 	t.Helper()
 	ln, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { ln.Close() })
+	seen := make(chan string, 8) // buffered: the test reads it after connecting
 	go func() {
 		for {
 			conn, err := ln.Accept()
@@ -68,9 +70,10 @@ func payloadServer(t *testing.T, target string, reply string, check func(string)
 				if err != nil {
 					return
 				}
-				var sb strings.Builder
-				sb.WriteString(req.Method + " " + req.URL.String() + " host=" + req.Host)
-				check(sb.String())
+				select {
+				case seen <- req.Method + " " + req.URL.String() + " host=" + req.Host:
+				default:
+				}
 				if reply != "" {
 					io.WriteString(conn, reply)
 				}
@@ -90,15 +93,14 @@ func payloadServer(t *testing.T, target string, reply string, check func(string)
 			}()
 		}
 	}()
-	return ln.Addr().String()
+	return ln.Addr().String(), seen
 }
 
 func TestSSHThroughInjectedPayload(t *testing.T) {
 	sshAddr, hostKey := startTestSSHServer(t)
 	target := newTarget(t)
 
-	var got string
-	proxy := payloadServer(t, sshAddr, "", func(line string) { got = line })
+	proxy, requests := payloadServer(t, sshAddr, "")
 
 	p := sshTestProfile(t, sshAddr)
 	p.HostKey = hostKey
@@ -114,7 +116,7 @@ func TestSSHThroughInjectedPayload(t *testing.T) {
 	if body := getThroughSOCKS(t, s.ListenPort, "", "", target.URL); !strings.Contains(body, "hello through tunnel") {
 		t.Fatalf("unexpected body through the payload tunnel: %q", body)
 	}
-	if !strings.Contains(got, "host=bug.example") {
+	if got := <-requests; !strings.Contains(got, "host=bug.example") {
 		t.Fatalf("payload request was %q, want the bug host", got)
 	}
 }
@@ -123,9 +125,8 @@ func TestSSHThroughConnectProxy(t *testing.T) {
 	sshAddr, hostKey := startTestSSHServer(t)
 	target := newTarget(t)
 
-	var got string
 	// A plain HTTP CONNECT proxy answers 200 before relaying.
-	proxy := payloadServer(t, sshAddr, "HTTP/1.1 200 Connection established\r\n\r\n", func(line string) { got = line })
+	proxy, requests := payloadServer(t, sshAddr, "HTTP/1.1 200 Connection established\r\n\r\n")
 
 	p := sshTestProfile(t, sshAddr)
 	p.HostKey = hostKey
@@ -140,14 +141,14 @@ func TestSSHThroughConnectProxy(t *testing.T) {
 	if body := getThroughSOCKS(t, s.ListenPort, "", "", target.URL); !strings.Contains(body, "hello through tunnel") {
 		t.Fatalf("unexpected body through the CONNECT proxy: %q", body)
 	}
-	if !strings.HasPrefix(got, http.MethodConnect+" ") {
+	if got := <-requests; !strings.HasPrefix(got, http.MethodConnect+" ") {
 		t.Fatalf("proxy saw %q, want a CONNECT request", got)
 	}
 }
 
 func TestPayloadProxyRejection(t *testing.T) {
 	sshAddr, hostKey := startTestSSHServer(t)
-	proxy := payloadServer(t, sshAddr, "HTTP/1.1 403 Forbidden\r\n\r\n", func(string) {})
+	proxy, _ := payloadServer(t, sshAddr, "HTTP/1.1 403 Forbidden\r\n\r\n")
 
 	p := sshTestProfile(t, sshAddr)
 	p.HostKey, p.PayloadProxy = hostKey, proxy

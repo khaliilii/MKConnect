@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"strings"
 	"testing"
+	"time"
 )
 
 // The phone app drives everything through these functions, so they are tested
@@ -183,5 +184,49 @@ func TestStartTestWithoutAccounts(t *testing.T) {
 	}
 	if p["running"] == true {
 		t.Fatal("no test should be running")
+	}
+}
+
+// TestStartTestRunsAndSaves drives the server test the way the app does:
+// start it, poll the progress, and find the measurement on the account
+// afterwards. The server doesn't exist, so the measurement is a failure —
+// which is exactly what the list has to be able to show.
+func TestStartTestRunsAndSaves(t *testing.T) {
+	newTestStore(t)
+	if _, err := Import("trojan://pw@127.0.0.1:1#dead"); err != nil {
+		t.Fatal(err)
+	}
+	id := profilesOf(t)["profiles"].([]any)[0].(map[string]any)["id"].(string)
+
+	if err := StartTest(id, false); err != nil {
+		t.Fatal(err)
+	}
+	if err := StartTest(id, false); err == nil {
+		t.Error("a second test should be refused while one runs")
+	}
+
+	deadline := time.Now().Add(60 * time.Second)
+	var p map[string]any
+	for time.Now().Before(deadline) {
+		if err := json.Unmarshal([]byte(TestProgress()), &p); err != nil {
+			t.Fatal(err)
+		}
+		if p["running"] == false && p["done"].(float64) > 0 {
+			break
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
+	if p["running"] != false {
+		t.Fatalf("the test did not finish: %v", p)
+	}
+	results := p["results"].(map[string]any)
+	if _, ok := results[id]; !ok {
+		t.Fatalf("no result for the account: %v", results)
+	}
+
+	// The measurement is kept, so the list shows it after the run.
+	shown := profilesOf(t)["profiles"].([]any)[0].(map[string]any)
+	if shown["test"] != "failed" || shown["test_ok"] == true {
+		t.Fatalf("the failed measurement was not stored: %v", shown)
 	}
 }

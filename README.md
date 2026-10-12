@@ -44,7 +44,13 @@ A multi-account client for **SSH, VMess, VLESS, Trojan, Shadowsocks, Hysteria2 a
 - core, mode (Proxy / TUN), local port, LAN sharing and proxy password, all saved as you change them
 - one-click connect / disconnect; selecting another account while connected switches to it
 - live connection info: inbound, outbound, core, upload / download speed and totals
-- live logs, a tray icon that keeps the connection running when the window is closed, and an About page
+- live logs: wrapped lines (a click shows one in full for copying), a filter box, a **Follow** toggle so reading
+  scrolled-back output isn't interrupted, and a log level picker (error … trace) that the next connection uses
+- the status line reports what actually works: while connecting, the measured latency once traffic reaches the
+  internet through the tunnel, or "no internet" with the reason when the core runs but nothing gets through
+- **auto-reconnect** (on by default): a connection that drops, or that stops carrying traffic for two checks
+  (45 s apart), is started again with a growing delay, up to ten attempts; a working connection resets the count
+- a tray icon that keeps the connection running when the window is closed, and an About page
 
 TUN mode (and gateway sharing) need administrator rights to create the virtual interface. The app itself runs
 as a normal user: when you connect in TUN mode it asks the system for permission (the macOS password dialog,

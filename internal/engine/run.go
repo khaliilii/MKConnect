@@ -7,6 +7,7 @@ import (
 	"log"
 	"net"
 	"strings"
+	"time"
 
 	"github.com/khaliilii/MKConnect/internal/gateway"
 	"github.com/khaliilii/MKConnect/internal/profile"
@@ -19,6 +20,9 @@ type Hooks struct {
 	OnHostKey func(key string)
 	// OnStarted is called once every core is up.
 	OnStarted func(*Session)
+	// OnHealth reports whether traffic actually reaches the internet through
+	// the connection: once right after it starts, then every 45 seconds.
+	OnHealth func(latency time.Duration, err error)
 }
 
 // Run starts the profile with the given settings and blocks until ctx is
@@ -107,6 +111,8 @@ func Run(ctx context.Context, p profile.Profile, s profile.Settings, hooks Hooks
 	if hooks.OnStarted != nil {
 		hooks.OnStarted(session)
 	}
+	// A core that starts is not yet a working connection; keep checking.
+	go monitorHealth(ctx, s, hooks.OnHealth)
 
 	stopped := make(chan error, len(engines))
 	for _, e := range engines {

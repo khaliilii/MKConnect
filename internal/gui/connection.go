@@ -106,6 +106,8 @@ func (u *ui) newConnectionPanel() fyne.CanvasObject {
 	clipboard.SetChecked(s.ClipboardImport)
 	ipv6 := widget.NewCheck("IPv6 through the tunnel (only if the server has IPv6)", nil)
 	ipv6.SetChecked(s.IPv6)
+	autoReconnect := widget.NewCheck("Reconnect automatically when the connection drops or stops working", nil)
+	autoReconnect.SetChecked(s.AutoReconnect)
 
 	updateVisibility := func() {
 		form.setVisible(extBox, s.Core == profile.CoreExternal)
@@ -129,6 +131,7 @@ func (u *ui) newConnectionPanel() fyne.CanvasObject {
 		s.RemoteDNS = strings.TrimSpace(remoteDNS.Text)
 		s.ClipboardImport = clipboard.Checked
 		s.IPv6 = ipv6.Checked
+		s.AutoReconnect = autoReconnect.Checked
 		updateVisibility()
 		u.save()
 	}
@@ -138,6 +141,7 @@ func (u *ui) newConnectionPanel() fyne.CanvasObject {
 	lan.OnChanged = func(bool) { changed() }
 	clipboard.OnChanged = func(bool) { changed() }
 	ipv6.OnChanged = func(bool) { changed() }
+	autoReconnect.OnChanged = func(bool) { changed() }
 	share.OnChanged = func(labels []string) {
 		if runtime.GOOS == "windows" && len(labels) > 1 {
 			// Internet Connection Sharing supports one adapter: keep the newest choice.
@@ -168,6 +172,7 @@ func (u *ui) newConnectionPanel() fyne.CanvasObject {
 		{Text: "Tunnel DNS", Widget: remoteDNS},
 		{Text: "", Widget: clipboard},
 		{Text: "", Widget: ipv6},
+		{Text: "", Widget: autoReconnect},
 	})
 	updateVisibility()
 	u.settingsBox = settings
@@ -204,44 +209,130 @@ func (u *ui) connect() {
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan struct{})
 	u.cancel, u.done = cancel, done
+	u.health = health{}
 	u.setState(stateConnecting, pc.Name)
 
-	// TUN mode creates network interfaces, which needs root/Administrator. Rather
-	// than asking users to start the app elevated, run the core in a helper
-	// that the system's own permission prompt starts.
-	run := engine.Run
-	if s.Mode == profile.ModeTUN && !isElevated() && !isMobile {
-		run = elevate.Run
-	}
+	run := runConnection
 
 	go func() {
-		err := run(ctx, pc, s, engine.Hooks{
-			OnHostKey: func(key string) {
-				fyne.Do(func() {
-					if saved, err := u.store.Find(id); err == nil {
-						saved.HostKey = key
-						u.save()
+		defer close(done)
+		var lastErr error
+		for attempt := 1; ; attempt++ {
+			// Each attempt gets its own context, so a connection that stops
+			// carrying traffic can be dropped without ending the whole run.
+			attemptCtx, attemptCancel := context.WithCancel(ctx)
+			fails := 0
+			err := run(attemptCtx, pc, s, engine.Hooks{
+				OnHostKey: func(key string) {
+					fyne.Do(func() {
+						if saved, err := u.store.Find(id); err == nil {
+							saved.HostKey = key
+							u.save()
+						}
+					})
+				},
+				OnStarted: func(session *engine.Session) {
+					fyne.Do(func() {
+						if u.done != done {
+							return
+						}
+						u.session = session
+						u.setState(stateConnected, pc.Name)
+					})
+				},
+				OnHealth: func(latency time.Duration, herr error) {
+					if herr == nil {
+						fails, attempt = 0, 1 // a working connection starts the count over
+					} else {
+						fails++
 					}
-				})
-			},
-			OnStarted: func(session *engine.Session) {
-				fyne.Do(func() {
-					u.session = session
-					u.setState(stateConnected, pc.Name)
-				})
-			},
-		})
+					fyne.Do(func() {
+						if u.done != done {
+							return
+						}
+						u.health = health{at: time.Now(), latency: latency, err: herr}
+						if u.state == stateConnected {
+							u.setState(stateConnected, pc.Name)
+						}
+					})
+					if fails == healthFailsBeforeReconnect && s.AutoReconnect {
+						u.logf("⚠️  no traffic through %s after %d checks; reconnecting", pc.Name, fails)
+						attemptCancel()
+					}
+				},
+			})
+			attemptCancel()
+			if err != nil {
+				lastErr = err
+			}
+			if ctx.Err() != nil {
+				return // the user disconnected
+			}
+			if !s.AutoReconnect || attempt >= maxReconnectAttempts {
+				if lastErr != nil {
+					fyne.Do(func() { dialog.ShowError(lastErr, u.win) })
+				}
+				return
+			}
+			wait := reconnectDelay(attempt)
+			if err != nil {
+				u.logf("⚠️  %s stopped: %v", pc.Name, err)
+			}
+			u.logf("🔄 reconnecting to %s in %s (attempt %d of %d)", pc.Name, wait, attempt+1, maxReconnectAttempts)
+			fyne.Do(func() {
+				if u.done != done {
+					return
+				}
+				u.session, u.health = nil, health{}
+				u.setState(stateReconnecting, pc.Name)
+			})
+			select {
+			case <-ctx.Done():
+				return
+			case <-time.After(wait):
+			}
+			fyne.Do(func() {
+				if u.done == done {
+					u.setState(stateConnecting, pc.Name)
+				}
+			})
+		}
+	}()
+	go func() {
+		<-done
 		fyne.Do(func() {
 			if u.done == done {
 				u.cancel, u.done, u.session = nil, nil, nil
+				u.health = health{}
 				u.setState(stateIdle, "")
 			}
-			if err != nil && ctx.Err() == nil {
-				dialog.ShowError(err, u.win)
-			}
 		})
-		close(done)
 	}()
+}
+
+// Reconnect policy: a dropped connection is retried with a growing delay,
+// and a connection that runs but carries no traffic is dropped and retried
+// too. A healthy connection resets the attempt count.
+const (
+	maxReconnectAttempts       = 10
+	healthFailsBeforeReconnect = 2
+)
+
+// reconnectDelay is how long to wait before attempt+1; a variable so tests
+// don't have to wait.
+var reconnectDelay = func(attempt int) time.Duration {
+	return min(time.Duration(attempt)*2*time.Second, 30*time.Second)
+}
+
+// runConnection runs one connection and blocks until it ends. TUN mode
+// creates network interfaces, which needs root/Administrator: rather than
+// asking users to start the app elevated, the core then runs in a helper that
+// the system's own permission prompt starts. Tests replace this.
+var runConnection = func(ctx context.Context, p profile.Profile, s profile.Settings, hooks engine.Hooks) error {
+	if s.Mode == profile.ModeTUN && !isElevated() && !isMobile {
+		return elevate.Run(ctx, p, s, hooks)
+	}
+	return engine.Run(ctx, p, s, hooks)
 }
 
 // disconnect stops the running connection and calls then once it has fully closed.
@@ -276,15 +367,33 @@ func (u *ui) setState(st connState, name string) {
 		u.connectBtn.SetText("Connect")
 		u.connectBtn.SetIcon(theme.MediaPlayIcon())
 		u.connectBtn.Importance = widget.HighImportance
-	case stateConnecting:
-		u.statusLabel.SetText("Connecting to " + name + "…")
+	case stateConnecting, stateReconnecting:
+		text := "Connecting to " + name + "…"
+		if st == stateReconnecting {
+			text = "Connection lost; reconnecting to " + name + "…"
+		}
+		u.statusLabel.SetText(text)
+		u.statusLabel.Importance = widget.MediumImportance
 		u.connectBtn.SetText("Cancel")
 		u.connectBtn.SetIcon(theme.CancelIcon())
 		u.connectBtn.Importance = widget.MediumImportance
 	case stateConnected:
 		s := &u.store.Settings
-		u.statusLabel.SetText(fmt.Sprintf("Connected to %s (%s, %s)", name, s.Core, s.Mode))
-		u.statusLabel.Importance = widget.SuccessImportance
+		text := fmt.Sprintf("Connected to %s (%s, %s)", name, s.Core, s.Mode)
+		importance := widget.SuccessImportance
+		switch {
+		case u.health.at.IsZero():
+			text += " · checking the connection…"
+		case u.health.err != nil:
+			// The core is up but nothing reaches the internet: say so instead
+			// of showing a green "Connected" the user can't use.
+			text = fmt.Sprintf("Connected to %s, but no internet: %s", name, u.health.err)
+			importance = widget.WarningImportance
+		default:
+			text += fmt.Sprintf(" · %d ms", u.health.latency.Milliseconds())
+		}
+		u.statusLabel.SetText(text)
+		u.statusLabel.Importance = importance
 		u.connectBtn.SetText("Disconnect")
 		u.connectBtn.SetIcon(theme.MediaStopIcon())
 		u.connectBtn.Importance = widget.DangerImportance

@@ -69,6 +69,11 @@ type status struct {
 	Down      int64     `json:"down"`
 	TrafficOK bool      `json:"traffic_ok"`
 	Updated   time.Time `json:"updated"`
+	// Health is the result of the helper's last internet check; HealthSeq
+	// counts the checks, so the app notices a new one.
+	HealthSeq int    `json:"health_seq,omitempty"`
+	HealthMS  int64  `json:"health_ms,omitempty"`
+	HealthErr string `json:"health_err,omitempty"`
 }
 
 // ErrDenied means the user declined the permission prompt.
@@ -126,10 +131,11 @@ func Run(ctx context.Context, p profile.Profile, s profile.Settings, hooks engin
 	}
 
 	var (
-		st      status
-		started bool
-		begin   = time.Now()
-		stopAt  time.Time
+		st         status
+		started    bool
+		lastHealth int
+		begin      = time.Now()
+		stopAt     time.Time
 	)
 	stop := func() {
 		if stopAt.IsZero() {
@@ -156,6 +162,14 @@ func Run(ctx context.Context, p profile.Profile, s profile.Settings, hooks engin
 
 		if cur, err := readStatus(dir); err == nil && cur.Seq == seq {
 			st = cur
+		}
+		if st.HealthSeq > lastHealth && hooks.OnHealth != nil {
+			lastHealth = st.HealthSeq
+			var herr error
+			if st.HealthErr != "" {
+				herr = errors.New(st.HealthErr)
+			}
+			hooks.OnHealth(time.Duration(st.HealthMS)*time.Millisecond, herr)
 		}
 		switch st.State {
 		case stateRunning:
@@ -421,6 +435,14 @@ func serveOne(dir string, st *statusWriter, req request, gone func() bool) error
 	defer close(stopTraffic)
 	err := engine.Run(ctx, req.Profile, req.Settings, engine.Hooks{
 		OnHostKey: func(key string) { st.set(func(s *status) { s.HostKey = key }) },
+		OnHealth: func(latency time.Duration, herr error) {
+			st.set(func(s *status) {
+				s.HealthSeq, s.HealthMS, s.HealthErr = s.HealthSeq+1, latency.Milliseconds(), ""
+				if herr != nil {
+					s.HealthErr = herr.Error()
+				}
+			})
+		},
 		OnStarted: func(s *engine.Session) {
 			session = s
 			st.set(func(x *status) {

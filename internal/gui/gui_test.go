@@ -1,7 +1,9 @@
 package gui
 
 import (
+	"context"
 	"encoding/base64"
+	"errors"
 	"image/png"
 	"net"
 	"net/http"
@@ -11,20 +13,23 @@ import (
 	"runtime"
 	"strconv"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
 	"fyne.io/fyne/v2"
 	"fyne.io/fyne/v2/test"
 	"fyne.io/fyne/v2/theme"
+	"fyne.io/fyne/v2/widget"
 
+	"github.com/khaliilii/MKConnect/internal/engine"
 	"github.com/khaliilii/MKConnect/internal/profile"
 )
 
 // The test driver can't serialize background refreshes with the tests, so
 // the session box's ticker effectively never fires (set once: a running
 // ticker goroutine of an earlier test still reads the variable).
-func init() { sessionRefreshInterval = time.Hour }
+func init() { sessionRefreshInterval, logRefreshInterval = time.Hour, time.Hour }
 
 // newTestUI builds the main window on Fyne's headless test driver.
 func newTestUI(t *testing.T) *ui {
@@ -323,4 +328,112 @@ func TestMobileLayout(t *testing.T) {
 	u.mobileTabs.SelectIndex(0)
 	u.showImport()
 	screenshot(t, u.win, "mobile-import")
+}
+
+func TestLogViewFilterLevelAndDetail(t *testing.T) {
+	u := newTestUI(t)
+	for _, line := range []string{"starting core", "❌ boom: connection refused", "🚀 running"} {
+		u.logs.add(line)
+	}
+	u.refreshLogs()
+	if got := u.logList.Length(); got != 3 {
+		t.Fatalf("log list shows %d lines, want 3", got)
+	}
+
+	u.logSearch.SetText("boom")
+	if got := u.logList.Length(); got != 1 {
+		t.Fatalf("filtered list shows %d lines, want 1", got)
+	}
+	u.logSearch.SetText("")
+	if got := u.logList.Length(); got != 3 {
+		t.Fatalf("after clearing the filter: %d lines, want 3", got)
+	}
+
+	// A click opens the full line, which long lines need.
+	u.logList.Select(1)
+	if u.win.Canvas().Overlays().Top() == nil {
+		t.Error("clicking a log line did not open it in full")
+	}
+
+	u.logLevel.SetSelected("debug")
+	if u.store.Settings.LogLevel != "debug" {
+		t.Fatalf("log level is %q, want debug", u.store.Settings.LogLevel)
+	}
+	saved, err := profile.Load(u.store.Path())
+	if err != nil || saved.Settings.LogLevel != "debug" {
+		t.Fatalf("log level not saved: %v", err)
+	}
+
+	u.logs.clear()
+	u.refreshLogs()
+	if got := u.logList.Length(); got != 0 {
+		t.Fatalf("after clear: %d lines, want 0", got)
+	}
+}
+
+// TestAutoReconnectAfterDrop drives the connection loop with a fake core: the
+// first attempt drops, the second one stays up and healthy.
+func TestAutoReconnectAfterDrop(t *testing.T) {
+	if raceEnabled {
+		t.Skip("background fyne.Do callbacks aren't serialized by the Fyne test driver")
+	}
+	u := newTestUI(t)
+	u.store.Settings.AutoReconnect = true
+
+	oldRun, oldDelay := runConnection, reconnectDelay
+	defer func() { runConnection, reconnectDelay = oldRun, oldDelay }()
+	reconnectDelay = func(int) time.Duration { return 10 * time.Millisecond }
+
+	var attempts atomic.Int32
+	runConnection = func(ctx context.Context, p profile.Profile, s profile.Settings, hooks engine.Hooks) error {
+		if attempts.Add(1) == 1 {
+			return errors.New("core stopped: boom") // a drop, not a user disconnect
+		}
+		hooks.OnStarted(engine.NewSession("singbox", []string{"SOCKS5 127.0.0.1:1080"}, p.Address(), nil))
+		hooks.OnHealth(42*time.Millisecond, nil)
+		<-ctx.Done()
+		return nil
+	}
+
+	u.connect()
+	waitFor(t, func() bool { return u.state == stateConnected })
+	if got := attempts.Load(); got != 2 {
+		t.Fatalf("the connection was attempted %d times, want 2 (one drop, one success)", got)
+	}
+	if text := u.statusLabel.Text; !strings.Contains(text, "42 ms") {
+		t.Errorf("status does not show the measured latency: %q", text)
+	}
+
+	u.disconnect(nil)
+	waitFor(t, func() bool { return u.state == stateIdle })
+	if got := attempts.Load(); got != 2 {
+		t.Fatalf("a user disconnect was retried: %d attempts", got)
+	}
+}
+
+// TestNoInternetIsReported shows a core that runs but carries no traffic as
+// such, instead of a green "Connected".
+func TestNoInternetIsReported(t *testing.T) {
+	if raceEnabled {
+		t.Skip("background fyne.Do callbacks aren't serialized by the Fyne test driver")
+	}
+	u := newTestUI(t)
+	u.store.Settings.AutoReconnect = false
+
+	oldRun := runConnection
+	defer func() { runConnection = oldRun }()
+	runConnection = func(ctx context.Context, p profile.Profile, s profile.Settings, hooks engine.Hooks) error {
+		hooks.OnStarted(engine.NewSession("singbox", []string{"SOCKS5 127.0.0.1:1080"}, p.Address(), nil))
+		hooks.OnHealth(0, errors.New("timeout"))
+		<-ctx.Done()
+		return nil
+	}
+
+	u.connect()
+	waitFor(t, func() bool { return strings.Contains(u.statusLabel.Text, "no internet") })
+	if u.statusLabel.Importance != widget.WarningImportance {
+		t.Errorf("a connection without internet is not marked as a warning: %v", u.statusLabel.Importance)
+	}
+	u.disconnect(nil)
+	waitFor(t, func() bool { return u.state == stateIdle })
 }

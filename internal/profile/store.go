@@ -52,6 +52,11 @@ type Settings struct {
 	// ClipboardImport makes the desktop app add share links found on the clipboard.
 	ClipboardImport bool `json:"clipboard_import"`
 
+	// AutoReconnect makes the app connect again when a running connection
+	// drops or stops carrying traffic. On by default (a missing key in an
+	// older profiles.json keeps the default).
+	AutoReconnect bool `json:"auto_reconnect"`
+
 	// SortBy orders the account list: "" (as added), "latency" or "speed".
 	SortBy string `json:"sort_by,omitempty"`
 
@@ -77,6 +82,7 @@ func DefaultSettings() Settings {
 		RemoteDNS:       "1.1.1.1",
 		LogLevel:        "info",
 		ClipboardImport: true,
+		AutoReconnect:   true,
 	}
 }
 

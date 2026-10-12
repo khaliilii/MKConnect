@@ -28,8 +28,16 @@ type connState int
 const (
 	stateIdle connState = iota
 	stateConnecting
+	stateReconnecting // dropped, waiting to try again
 	stateConnected
 )
+
+// health is the last result of the connection's internet check.
+type health struct {
+	at      time.Time // zero while no check has finished yet
+	latency time.Duration
+	err     error
+}
 
 // ui holds the application state. All fields are only touched on the Fyne
 // main goroutine; background work reports back through fyne.Do.
@@ -64,8 +72,13 @@ type ui struct {
 	lastClipboard  string
 	session        *engine.Session // nil while disconnected
 	refreshSession func()          // updates the session box from u.session
+	refreshLogs    func()          // redraws the log list
+	logList        *widget.List
+	logSearch      *widget.Entry
+	logLevel       *widget.Select
 
 	state  connState
+	health health
 	cancel context.CancelFunc
 	done   chan struct{}
 

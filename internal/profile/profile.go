@@ -43,6 +43,15 @@ type Profile struct {
 	// the server's own resolver (transparent DNS), overriding the DNS setting.
 	UDPGWPort int  `json:"udpgw_port,omitempty"`
 	UDPGWDNS  bool `json:"udpgw_dns,omitempty"`
+	// Payload is an HTTP request sent on the raw socket before the SSH
+	// handshake (the "SSH payload" of HTTP Injector and KPN Tunnel), so
+	// filters that only pass HTTP(S) traffic see a request to an allowed
+	// host. Placeholders: [host] [port] [host_port] [raw] [crlf] [cr] [lf]
+	// [split] [delay_split]. PayloadProxy ("host:port") sends the payload to
+	// a proxy instead of the SSH server; set on its own it is a plain HTTP
+	// CONNECT proxy.
+	Payload      string `json:"payload,omitempty"`
+	PayloadProxy string `json:"payload_proxy,omitempty"`
 
 	// VMess / VLESS
 	UUID     string `json:"uuid,omitempty"`
@@ -125,6 +134,9 @@ func (p *Profile) Validate() error {
 		if p.Password == "" && p.PrivateKeyPath == "" {
 			return fmt.Errorf("ssh: password or private key is required")
 		}
+		if err := validateHostPort(p.PayloadProxy); err != nil {
+			return fmt.Errorf("ssh: payload proxy: %w", err)
+		}
 	case TypeVMess, TypeVLESS:
 		if p.UUID == "" {
 			return fmt.Errorf("%s: uuid is required", p.Type)
@@ -151,6 +163,9 @@ func (p *Profile) Validate() error {
 	default:
 		return fmt.Errorf("unknown profile type %q", p.Type)
 	}
+	if p.Type != TypeSSH && (p.Payload != "" || p.PayloadProxy != "") {
+		return fmt.Errorf("the payload only applies to SSH")
+	}
 	switch p.Transport.Network {
 	case "", "tcp", "ws", "grpc", "httpupgrade", "xhttp":
 	default:
@@ -173,6 +188,25 @@ func (p *Profile) Validate() error {
 		}
 	default:
 		return fmt.Errorf("unsupported tls mode %q", p.TLS.Mode)
+	}
+	return nil
+}
+
+// validateHostPort accepts an empty value or a "host:port" address.
+func validateHostPort(addr string) error {
+	if addr == "" {
+		return nil
+	}
+	host, port, err := net.SplitHostPort(addr)
+	if err != nil {
+		return fmt.Errorf("%q is not host:port", addr)
+	}
+	if host == "" {
+		return fmt.Errorf("%q has no host", addr)
+	}
+	n, err := strconv.Atoi(port)
+	if err != nil || n < 1 || n > 65535 {
+		return fmt.Errorf("%q has an invalid port", addr)
 	}
 	return nil
 }

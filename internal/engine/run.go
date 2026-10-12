@@ -35,7 +35,7 @@ func Run(ctx context.Context, p profile.Profile, s profile.Settings, hooks Hooks
 	}
 
 	if p.Type == profile.TypeSSH && p.HostKey == "" {
-		key, err := FetchHostKey(ctx, p.Address())
+		key, err := FetchHostKey(ctx, p)
 		if err != nil {
 			return fmt.Errorf("fetch ssh host key: %w", err)
 		}

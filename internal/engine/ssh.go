@@ -37,8 +37,9 @@ var (
 )
 
 // FetchHostKey connects to an SSH server just far enough to read its host key,
-// returned in authorized_keys format.
-func FetchHostKey(ctx context.Context, addr string) (string, error) {
+// returned in authorized_keys format. It goes through the profile's payload
+// and proxy, if it has any.
+func FetchHostKey(ctx context.Context, p profile.Profile) (string, error) {
 	var key string
 	cfg := &ssh.ClientConfig{
 		User: "mkconnect-probe",
@@ -48,13 +49,12 @@ func FetchHostKey(ctx context.Context, addr string) (string, error) {
 		},
 		Timeout: sshDialTimeout,
 	}
-	d := net.Dialer{Timeout: sshDialTimeout}
-	conn, err := d.DialContext(ctx, "tcp", addr)
+	conn, err := dialPayload(ctx, &p)
 	if err != nil {
 		return "", err
 	}
 	defer conn.Close()
-	_, _, _, err = ssh.NewClientConn(conn, addr, cfg)
+	_, _, _, err = ssh.NewClientConn(conn, p.Address(), cfg)
 	if key == "" {
 		return "", err
 	}
@@ -74,8 +74,9 @@ func Fingerprint(authorizedKey string) string {
 // sshEngine is a SOCKS5 proxy that forwards connections through an SSH client
 // and reconnects when the SSH session drops.
 type sshEngine struct {
-	addr   string
-	config *ssh.ClientConfig
+	addr    string
+	config  *ssh.ClientConfig
+	profile profile.Profile // for the payload / proxy of each new connection
 
 	mu          sync.Mutex
 	client      *ssh.Client
@@ -94,10 +95,11 @@ func startSSH(p *profile.Profile, s *profile.Settings) (Engine, error) {
 		return nil, err
 	}
 	e := &sshEngine{
-		addr:   p.Address(),
-		config: cfg,
-		done:   make(chan error, 1),
-		closed: make(chan struct{}),
+		addr:    p.Address(),
+		config:  cfg,
+		profile: *p,
+		done:    make(chan error, 1),
+		closed:  make(chan struct{}),
 	}
 	if _, err := e.connect(); err != nil {
 		return nil, err
@@ -248,7 +250,7 @@ func sshClientConfig(p *profile.Profile) (*ssh.ClientConfig, error) {
 func (e *sshEngine) connect() (*ssh.Client, error) {
 	var lastErr error
 	for attempt := 1; attempt <= 3; attempt++ {
-		c, err := ssh.Dial("tcp", e.addr, e.config)
+		c, err := e.dialClient()
 		if err == nil {
 			e.mu.Lock()
 			old := e.client
@@ -274,9 +276,27 @@ func (e *sshEngine) connect() (*ssh.Client, error) {
 	return nil, fmt.Errorf("ssh connect %s: %w", e.addr, lastErr)
 }
 
+// dialClient opens a TCP connection (through the payload, if the profile has
+// one) and runs the SSH handshake on it.
+func (e *sshEngine) dialClient() (*ssh.Client, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), sshDialTimeout)
+	defer cancel()
+	conn, err := dialPayload(ctx, &e.profile)
+	if err != nil {
+		return nil, err
+	}
+	c, chans, reqs, err := ssh.NewClientConn(conn, e.addr, e.config)
+	if err != nil {
+		conn.Close()
+		return nil, err
+	}
+	return ssh.NewClient(c, chans, reqs), nil
+}
+
 // isPermanentSSHError reports errors that retrying won't fix.
 func isPermanentSSHError(err error) bool {
-	return errors.Is(err, errHostKeyMismatch) || strings.Contains(err.Error(), "unable to authenticate")
+	return errors.Is(err, errHostKeyMismatch) || errors.Is(err, errPayloadRejected) ||
+		strings.Contains(err.Error(), "unable to authenticate")
 }
 
 func (e *sshEngine) current() *ssh.Client {

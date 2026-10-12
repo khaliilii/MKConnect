@@ -90,6 +90,8 @@ func newProfileShowCmd() *cobra.Command {
 			if p.UDPGWPort > 0 {
 				printIf("udpgw", fmt.Sprintf("port %d, transparent DNS %t", p.UDPGWPort, p.UDPGWDNS))
 			}
+			printIf("payload", p.Payload)
+			printIf("payload proxy", p.PayloadProxy)
 			printIf("host key", p.HostKey)
 			printIf("uuid", mask(p.UUID))
 			printIf("security", p.Security)
@@ -132,6 +134,8 @@ func (pf *profileFlags) register(f *pflag.FlagSet) {
 	f.StringVar(&p.HostKey, "host-key", "", "pin the SSH host key (authorized_keys format); empty = trust on first use")
 	f.IntVar(&p.UDPGWPort, "udpgw-port", 0, "SSH: port of badvpn-udpgw on the server, carries UDP through the tunnel (e.g. 7300)")
 	f.BoolVar(&p.UDPGWDNS, "udpgw-dns", false, "SSH: udpgw transparent DNS, uses the server's resolver (overrides the DNS setting)")
+	f.StringVar(&p.Payload, "payload", "", "SSH: HTTP payload sent before the handshake, e.g. \"GET / HTTP/1.1[crlf]Host: bug.example[crlf][crlf]\" (tags: [host] [port] [host_port] [raw] [crlf] [cr] [lf] [split] [delay_split])")
+	f.StringVar(&p.PayloadProxy, "payload-proxy", "", "SSH: send the payload to this host:port instead of the server; on its own, use it as an HTTP CONNECT proxy")
 	f.StringVar(&p.UUID, "uuid", "", "VMess / VLESS user id")
 	f.IntVar(&p.AlterID, "alter-id", 0, "VMess alterId")
 	f.StringVar(&p.Security, "security", "", "VMess cipher (auto, aes-128-gcm, chacha20-poly1305, none)")
@@ -173,6 +177,8 @@ func (pf *profileFlags) apply(f *pflag.FlagSet, dst *profile.Profile) error {
 	set("host-key", func() { dst.HostKey = src.HostKey })
 	set("udpgw-port", func() { dst.UDPGWPort = src.UDPGWPort })
 	set("udpgw-dns", func() { dst.UDPGWDNS = src.UDPGWDNS })
+	set("payload", func() { dst.Payload = src.Payload })
+	set("payload-proxy", func() { dst.PayloadProxy = src.PayloadProxy })
 	set("uuid", func() { dst.UUID = src.UUID })
 	set("alter-id", func() { dst.AlterID = src.AlterID })
 	set("security", func() { dst.Security = src.Security })

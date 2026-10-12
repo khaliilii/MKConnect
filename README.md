@@ -22,6 +22,15 @@ A multi-account client for **SSH, VMess, VLESS, Trojan, Shadowsocks, Hysteria2 a
   so MKConnect acts as a router instead: Linux uses sing-box `auto_redirect` + IP forwarding, macOS IP forwarding,
   Windows Internet Connection Sharing (devices get 192.168.137.x automatically). Everything is undone on disconnect.
   `scripts/test-gateway-linux.sh` checks it end to end with network namespaces.
+- **SSH payload** (HTTP Injector / KPN Tunnel style): an HTTP request sent on the raw socket before the SSH
+  handshake, so filters that only pass HTTP(S) traffic see a request to an allowed ("bug") host. Set it per
+  account (**Payload** in the SSH form, `--payload` on the CLI, `payload=` in an `ssh://` link) with the tags
+  `[host]`, `[port]`, `[host_port]`, `[raw]`, `[crlf]`, `[cr]`, `[lf]`, `[split]` and `[delay_split]`; unknown
+  `[tags]` are sent as they are. **Payload proxy** (`--payload-proxy`, `host:port`) sends the payload to a
+  proxy instead of the server, and on its own makes the account connect through a plain HTTP `CONNECT` proxy.
+  A payload whose first line is a `CONNECT` is answered with an HTTP status, which must be 2xx; an injected
+  `GET`/`POST` payload expects no answer. Example:
+  `GET / HTTP/1.1[crlf]Host: bug.example[crlf]Upgrade: websocket[crlf][crlf]`
 - SSH host keys are pinned on first connect (trust on first use), and a changed key is refused
 - Profiles are stored in `<user config dir>/mkconnect/profiles.json` with owner-only permissions
 

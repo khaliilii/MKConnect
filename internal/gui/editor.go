@@ -78,6 +78,17 @@ func (u *ui) openEditor(p profile.Profile, isNew bool) {
 		}
 		udpgwDNS := widget.NewCheck("Enable UDPGW transparent DNS (this may override any set custom DNS server)", nil)
 		udpgwDNS.SetChecked(p.UDPGWDNS)
+		payload := widget.NewMultiLineEntry()
+		payload.SetText(p.Payload)
+		payload.SetPlaceHolder("optional, e.g. GET / HTTP/1.1[crlf]Host: bug.example[crlf][crlf]")
+		payload.Wrapping = fyne.TextWrapBreak
+		payload.SetMinRowsVisible(3)
+		payloadHint := widget.NewLabel("Sent before the SSH handshake, like HTTP Injector. Tags: [host] [port] " +
+			"[host_port] [raw] [crlf] [cr] [lf] [split] [delay_split].")
+		payloadHint.Wrapping = fyne.TextWrapWord
+		payloadHint.Importance = widget.LowImportance
+		payloadHint.SizeName = theme.SizeNameCaptionText
+		payloadProxy := entry(p.PayloadProxy, "optional, host:port the payload goes to (a bug/remote proxy)")
 		items = append(items,
 			widget.NewFormItem("Username", user),
 			widget.NewFormItem("Password", pass),
@@ -85,12 +96,17 @@ func (u *ui) openEditor(p profile.Profile, isNew bool) {
 			widget.NewFormItem("Host key", container.NewBorder(nil, nil, nil, resetHostKey, hostKeyLabel)),
 			widget.NewFormItem("UDPGW port", udpgwPort),
 			widget.NewFormItem("", udpgwDNS),
+			widget.NewFormItem("Payload", payload),
+			widget.NewFormItem("", payloadHint),
+			widget.NewFormItem("Payload proxy", payloadProxy),
 		)
 		collect = append(collect, func(p *profile.Profile) {
 			p.User, p.Password = strings.TrimSpace(user.Text), pass.Text
 			p.PrivateKeyPath, p.HostKey = strings.TrimSpace(key.Text), hostKey
 			p.UDPGWPort, _ = strconv.Atoi(strings.TrimSpace(udpgwPort.Text))
 			p.UDPGWDNS = p.UDPGWPort > 0 && udpgwDNS.Checked
+			p.Payload = strings.TrimSpace(payload.Text)
+			p.PayloadProxy = strings.TrimSpace(payloadProxy.Text)
 		})
 
 	case profile.TypeVMess, profile.TypeVLESS:

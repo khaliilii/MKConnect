@@ -57,7 +57,7 @@ func Test(ctx context.Context, p profile.Profile, s profile.Settings, o TestOpti
 
 	if p.Type == profile.TypeSSH && p.HostKey == "" {
 		// Trust the key for this test only; connecting pins it for real.
-		key, err := FetchHostKey(ctx, p.Address())
+		key, err := FetchHostKey(ctx, p)
 		if err != nil {
 			return fail(err)
 		}

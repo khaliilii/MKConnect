@@ -191,3 +191,34 @@ func TestParseTCPHTTPHeader(t *testing.T) {
 		t.Fatalf("vmess round trip: %+v", w.Transport)
 	}
 }
+
+func TestSSHPayloadLink(t *testing.T) {
+	want := Profile{
+		Name: "box", Type: TypeSSH, Server: "h.example", Port: 22, User: "u", Password: "p",
+		Payload:      "GET / HTTP/1.1[crlf]Host: bug.example[crlf][crlf]",
+		PayloadProxy: "1.2.3.4:8080",
+	}
+	// An exported link keeps the payload (but never the password), so adding
+	// the password back must give the profile again.
+	link := want.Link()
+	got, err := ParseLink(strings.Replace(link, "ssh://u@", "ssh://u:p@", 1))
+	if err != nil {
+		t.Fatalf("re-parse %s: %v", link, err)
+	}
+	assertProfile(t, got, want)
+}
+
+func TestPayloadOnlyAppliesToSSH(t *testing.T) {
+	p := Profile{Name: "v", Type: TypeVMess, Server: "h", Port: 443, UUID: "u", Payload: "GET /"}
+	if err := p.Validate(); err == nil {
+		t.Fatal("want an error for a payload on a non-SSH profile")
+	}
+	ssh := Profile{Name: "s", Type: TypeSSH, Server: "h", Port: 22, User: "u", Password: "p", PayloadProxy: "nope"}
+	if err := ssh.Validate(); err == nil {
+		t.Fatal("want an error for a payload proxy that is not host:port")
+	}
+	ssh.PayloadProxy = "1.2.3.4:8080"
+	if err := ssh.Validate(); err != nil {
+		t.Fatalf("valid payload proxy rejected: %v", err)
+	}
+}

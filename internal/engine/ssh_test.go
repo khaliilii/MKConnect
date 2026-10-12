@@ -144,7 +144,7 @@ func newTarget(t *testing.T) *httptest.Server {
 
 func TestFetchHostKey(t *testing.T) {
 	addr, want := startTestSSHServer(t)
-	got, err := FetchHostKey(t.Context(), addr)
+	got, err := FetchHostKey(t.Context(), sshTestProfile(t, addr))
 	if err != nil {
 		t.Fatal(err)
 	}

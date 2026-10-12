@@ -146,10 +146,30 @@ GitHub Actions builds these on every push and attaches them to a release for `v*
 | Android app (APK) | ✅ | ✅ | ✅ | ✅ |
 | CLI, Linux / Windows / macOS / Android | ✅ | ✅ | ✅ | ✅ (Linux) |
 
-On Android the app runs either as a system-wide VPN (Android's own VpnService carries the TUN) or in proxy
-mode (a local SOCKS/HTTP proxy, shareable over a hotspot), chosen under **Mode**. Either way the connection is
-checked the same as on the desktop: the status line reports the latency when traffic gets through, says so when
-it doesn't, and reconnects by itself.
+## Android app
+
+The APK is a native app (Kotlin, Compose) on the same Go core, with what the desktop app has:
+
+- accounts with a search box, group chips, the result of the last server test, and a long press for edit, test,
+  copy share link, move to another group and delete
+- an **account form for every protocol**, including the SSH payload and UDPGW fields, the transport (ws, grpc,
+  httpupgrade, xhttp, tcp with HTTP header) and TLS / REALITY
+- bulk **import** of links or a subscription URL, optionally into a group, groups you create and rename,
+  subscription usage and refresh, and links copied to the clipboard added when the app opens
+- **server tests** of one account or all of them (latency, optionally download speed) with progress, and sorting
+  the list by latency or speed
+- every setting that means anything on a phone: VPN or proxy mode, port, LAN sharing with a proxy password,
+  tunnel DNS, IPv6, auto-reconnect, clipboard import, log level, VPN stack and MTU
+- a **log screen** with a filter, a follow switch, copy and clear, showing the core's log and the connection's
+  own messages (health checks, reconnects)
+- the connection checked as on the desktop: the latency when traffic gets through, "no internet" with the reason
+  when it doesn't, and a reconnect by itself — in the app and in the VPN notification
+
+The layout follows the screen: one pane with a bottom bar on a phone, and from 720dp (a tablet, or a phone in
+landscape) a navigation rail with the account list and the connect button beside the settings or the log.
+
+It runs either as a system-wide VPN (Android's own VpnService carries the TUN) or in proxy mode (a local
+SOCKS/HTTP proxy, shareable over a hotspot), chosen under **Mode**.
 
 ## Roadmap
 

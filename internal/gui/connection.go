@@ -7,6 +7,7 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"fyne.io/fyne/v2"
@@ -216,6 +217,10 @@ func (u *ui) connect() {
 	go func() {
 		defer close(done)
 		var lastErr error
+		// Reconnecting is for a connection that was up and dropped. When the
+		// first attempt never comes up (a message entry, a taken port, a
+		// denied permission prompt), trying again only repeats the error.
+		var everStarted atomic.Bool
 		for attempt := 1; ; attempt++ {
 			// Each attempt gets its own context, so a connection that stops
 			// carrying traffic can be dropped without ending the whole run.
@@ -231,6 +236,7 @@ func (u *ui) connect() {
 					})
 				},
 				OnStarted: func(session *engine.Session) {
+					everStarted.Store(true)
 					fyne.Do(func() {
 						if u.done != done {
 							return
@@ -267,7 +273,7 @@ func (u *ui) connect() {
 			if ctx.Err() != nil {
 				return // the user disconnected
 			}
-			if !s.AutoReconnect || attempt >= maxReconnectAttempts {
+			if !s.AutoReconnect || attempt >= maxReconnectAttempts || !everStarted.Load() {
 				if lastErr != nil {
 					fyne.Do(func() { dialog.ShowError(lastErr, u.win) })
 				}

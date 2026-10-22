@@ -222,3 +222,15 @@ func TestPayloadOnlyAppliesToSSH(t *testing.T) {
 		t.Fatalf("valid payload proxy rejected: %v", err)
 	}
 }
+
+func TestInfoEntries(t *testing.T) {
+	banner := Profile{Name: "⏳Used: 47.61 GB  All: 100.0 GB", Type: TypeVMess, Server: "Asgard By ODIN", Port: 1111, UUID: "u"}
+	if !banner.IsInfo() {
+		t.Error("a subscription message entry was taken for a server")
+	}
+	for _, server := range []string{"de.example.com", "1.2.3.4", "2001:db8::1"} {
+		if (&Profile{Server: server}).IsInfo() {
+			t.Errorf("%s was taken for a message entry", server)
+		}
+	}
+}

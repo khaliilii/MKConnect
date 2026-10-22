@@ -113,6 +113,10 @@ func Test(ctx context.Context, p profile.Profile, s profile.Settings, o TestOpti
 		return r
 	}
 
+	if p.IsInfo() {
+		r.Received, r.Error = 0, "not a server: a message from the subscription"
+		return r
+	}
 	if err := p.Validate(); err != nil {
 		return fail(err)
 	}

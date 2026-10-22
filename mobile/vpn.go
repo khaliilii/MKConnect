@@ -129,6 +129,9 @@ func Start(app Platform) error {
 	}
 	prof, settings := *p, s.Settings
 	mu.Unlock()
+	if prof.IsInfo() {
+		return setError(fmt.Errorf("%q: %w", prof.Name, profile.ErrInfoEntry))
+	}
 
 	settings.Core, settings.Mode = profile.CoreSingBox, profile.ModeProxy
 	vpn := app != nil && settings.PhoneMode != "proxy"
@@ -236,7 +239,7 @@ func startHealthMonitor(s profile.Settings) {
 	stop := make(chan struct{})
 	monitorStop = stop
 	go func() {
-		fails, wait := 0, healthFirstCheck
+		fails, wait, first := 0, healthFirstCheck, true
 		for {
 			select {
 			case <-stop:
@@ -244,7 +247,10 @@ func startHealthMonitor(s profile.Settings) {
 			case <-time.After(wait):
 			}
 			wait = healthEvery
-			latency, err := engine.CheckHealth(context.Background(), s)
+			// Confirmed: a fresh connection often stalls for a few seconds
+			// before traffic flows, which must not read as "no internet".
+			latency, err := engine.CheckHealthConfirmed(context.Background(), s, first)
+			first = false
 
 			runMu.Lock()
 			if monitorStop != stop {

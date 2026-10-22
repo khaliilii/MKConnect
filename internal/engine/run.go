@@ -28,6 +28,9 @@ type Hooks struct {
 // Run starts the profile with the given settings and blocks until ctx is
 // cancelled or the core stops on its own.
 func Run(ctx context.Context, p profile.Profile, s profile.Settings, hooks Hooks) error {
+	if p.IsInfo() {
+		return fmt.Errorf("%q: %w", p.Name, profile.ErrInfoEntry)
+	}
 	if err := p.Validate(); err != nil {
 		return fmt.Errorf("profile %q: %w", p.Name, err)
 	}

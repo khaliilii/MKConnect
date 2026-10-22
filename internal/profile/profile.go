@@ -5,9 +5,11 @@ package profile
 import (
 	"crypto/rand"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"net"
 	"strconv"
+	"strings"
 )
 
 // Protocol types.
@@ -106,6 +108,17 @@ func NewID() string {
 	_, _ = rand.Read(b)
 	return hex.EncodeToString(b)
 }
+
+// IsInfo reports whether the "account" is a message a subscription sends in
+// an account's place (data used, days left, "update the app"): its server is
+// not a host name but text such as "Asgard By ODIN". Such entries are kept,
+// since their names carry the message, but can't be connected or tested.
+func (p *Profile) IsInfo() bool {
+	return strings.ContainsAny(strings.TrimSpace(p.Server), " \t")
+}
+
+// ErrInfoEntry is returned for connecting to or testing an IsInfo entry.
+var ErrInfoEntry = errors.New("this entry is a message from the subscription, not a server")
 
 // Address returns host:port of the server.
 func (p *Profile) Address() string {

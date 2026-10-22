@@ -25,10 +25,11 @@ func TestRunReportsHealth(t *testing.T) {
 		w.WriteHeader(http.StatusNoContent)
 	}))
 	defer srv.Close()
-	old, oldFallback := LatencyURL, FallbackURLs
+	old, oldFallback, oldRetry := LatencyURL, FallbackURLs, healthRetry
 	LatencyURL = strings.Replace(srv.URL, "127.0.0.1", "localhost", 1) + "/generate_204"
 	FallbackURLs = nil // no real internet in tests
-	defer func() { LatencyURL, FallbackURLs = old, oldFallback }()
+	healthRetry = 50 * time.Millisecond
+	defer func() { LatencyURL, FallbackURLs, healthRetry = old, oldFallback, oldRetry }()
 
 	serverPort := freePort(t)
 	startProtocolServer(t, []obj{{
@@ -140,5 +141,59 @@ func TestProbeSurvivesOneBlockedTarget(t *testing.T) {
 	LatencyURL, FallbackURLs = blocked.URL, []string{blocked.URL + "/x"}
 	if _, err := probeAny(t.Context(), c); err == nil {
 		t.Fatal("all targets failing was reported as working")
+	}
+}
+
+// TestSlowStartIsNotReportedAsDead: a connection whose first checks fail
+// while the path warms up (seen on the user's network: ~12 s of stalls, then
+// fast traffic) is reported as working, not as "no internet".
+func TestSlowStartIsNotReportedAsDead(t *testing.T) {
+	oldCheck, oldRetry := healthCheck, healthRetry
+	defer func() { healthCheck, healthRetry = oldCheck, oldRetry }()
+	healthRetry = 10 * time.Millisecond
+
+	calls := 0
+	healthCheck = func(context.Context, profile.Settings) (time.Duration, error) {
+		calls++
+		if calls < healthFirstTries {
+			return 0, explainFailure(errors.New("context deadline exceeded"))
+		}
+		return 300 * time.Millisecond, nil
+	}
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+	reports := make(chan error, 4)
+	go monitorHealth(ctx, profile.Settings{}, func(_ time.Duration, err error) { reports <- err })
+	select {
+	case err := <-reports:
+		if err != nil {
+			t.Fatalf("a connection that works after a slow start was reported dead: %v", err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("no report")
+	}
+	cancel() // the first monitor must stop before healthCheck changes
+	time.Sleep(20 * time.Millisecond)
+	if calls != healthFirstTries {
+		t.Errorf("checked %d times, want %d", calls, healthFirstTries)
+	}
+
+	// A connection that never works is still reported, after the tries.
+	calls = 0
+	healthCheck = func(context.Context, profile.Settings) (time.Duration, error) {
+		calls++
+		return 0, explainFailure(errors.New("EOF"))
+	}
+	ctx2, cancel2 := context.WithCancel(t.Context())
+	defer cancel2()
+	reports2 := make(chan error, 4)
+	go monitorHealth(ctx2, profile.Settings{}, func(_ time.Duration, err error) { reports2 <- err })
+	select {
+	case err := <-reports2:
+		if err == nil {
+			t.Fatal("a dead connection was reported working")
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("no report for a dead connection")
 	}
 }

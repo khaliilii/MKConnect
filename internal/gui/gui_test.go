@@ -387,7 +387,9 @@ func TestAutoReconnectAfterDrop(t *testing.T) {
 	var attempts atomic.Int32
 	runConnection = func(ctx context.Context, p profile.Profile, s profile.Settings, hooks engine.Hooks) error {
 		if attempts.Add(1) == 1 {
-			return errors.New("core stopped: boom") // a drop, not a user disconnect
+			// Up, then dropped: not a user disconnect.
+			hooks.OnStarted(engine.NewSession("singbox", []string{"SOCKS5 127.0.0.1:1080"}, p.Address(), nil))
+			return errors.New("core stopped: boom")
 		}
 		hooks.OnStarted(engine.NewSession("singbox", []string{"SOCKS5 127.0.0.1:1080"}, p.Address(), nil))
 		hooks.OnHealth(42*time.Millisecond, nil)
@@ -436,4 +438,29 @@ func TestNoInternetIsReported(t *testing.T) {
 	}
 	u.disconnect(nil)
 	waitFor(t, func() bool { return u.state == stateIdle })
+}
+
+// TestFailedFirstConnectIsNotRetried: a connection that never came up shows
+// its error at once instead of being retried ten times.
+func TestFailedFirstConnectIsNotRetried(t *testing.T) {
+	if raceEnabled {
+		t.Skip("background fyne.Do callbacks aren't serialized by the Fyne test driver")
+	}
+	u := newTestUI(t)
+	u.store.Settings.AutoReconnect = true
+	oldRun, oldDelay := runConnection, reconnectDelay
+	defer func() { runConnection, reconnectDelay = oldRun, oldDelay }()
+	reconnectDelay = func(int) time.Duration { return time.Millisecond }
+
+	var attempts atomic.Int32
+	runConnection = func(ctx context.Context, p profile.Profile, s profile.Settings, hooks engine.Hooks) error {
+		attempts.Add(1)
+		return profile.ErrInfoEntry
+	}
+	u.connect()
+	waitFor(t, func() bool { return u.state == stateIdle && u.cancel == nil })
+	time.Sleep(50 * time.Millisecond)
+	if got := attempts.Load(); got != 1 {
+		t.Fatalf("a connection that never came up was tried %d times, want 1", got)
+	}
 }

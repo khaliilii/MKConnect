@@ -378,7 +378,11 @@ func (u *ui) setState(st connState, name string) {
 		u.connectBtn.Importance = widget.MediumImportance
 	case stateConnected:
 		s := &u.store.Settings
-		text := fmt.Sprintf("Connected to %s (%s, %s)", name, s.Core, s.Mode)
+		core := s.Core
+		if u.session != nil && u.session.Core != "" {
+			core = u.session.Core // what really runs: an account can need another core
+		}
+		text := fmt.Sprintf("Connected to %s (%s, %s)", name, core, s.Mode)
 		importance := widget.SuccessImportance
 		switch {
 		case u.health.at.IsZero():
@@ -414,11 +418,7 @@ func lanAddresses(s *profile.Settings) string {
 	if len(ips) == 0 {
 		return "No network address found."
 	}
-	proto := "SOCKS5 / HTTP"
-	if s.Core != profile.CoreSingBox {
-		proto = "SOCKS5"
-	}
-	msg := "Other devices can use " + proto + " proxy: " + strings.Join(ips, ", ")
+	msg := "Other devices can use it as SOCKS5 or HTTP proxy (SSH accounts: SOCKS5 only): " + strings.Join(ips, ", ")
 	if s.ProxyUser == "" {
 		msg += "\n⚠ No proxy password set: anyone on the network can use it."
 	}

@@ -122,7 +122,7 @@ func Test(ctx context.Context, p profile.Profile, s profile.Settings, o TestOpti
 	}
 	s.Mode, s.ListenPort, s.AllowLAN, s.ShareInterfaces = profile.ModeProxy, port, false, nil
 	s.ProxyUser, s.ProxyPass = "", ""
-	s.Core = testCore(&p, &s)
+	s.Core = PreferredCore(&p, &s)
 
 	if p.Type == profile.TypeSSH && p.HostKey == "" {
 		// Trust the key for this test only; connecting pins it for real.
@@ -176,18 +176,28 @@ func Test(ctx context.Context, p profile.Profile, s profile.Settings, o TestOpti
 	return r
 }
 
-// testCore picks the core for a test: the configured one, unless it can't
-// run this profile.
-func testCore(p *profile.Profile, s *profile.Settings) string {
+// PreferredCore is the core that runs a profile best: the configured one,
+// unless it can't run this profile or another core speaks its protocol
+// natively.
+//
+//   - Hysteria2 and TUIC need sing-box; xhttp needs Xray.
+//   - VMess/VLESS/Trojan/Shadowsocks over TCP with the HTTP header: sing-box
+//     only emulates it with its HTTP transport, and some Xray servers answer
+//     that with "400 Bad Request" (a full test found one refusing 7 of 8
+//     requests that Xray carried), so Xray runs them when it is available.
+//     Its proxy port serves HTTP as well as SOCKS5, so nothing changes for
+//     the apps that use it.
+func PreferredCore(p *profile.Profile, s *profile.Settings) string {
 	core := s.Core
-	if core == profile.CoreExternal {
+	if core == profile.CoreExternal || p.Type == profile.TypeSSH {
 		return core
 	}
 	quic := p.Type == profile.TypeHysteria2 || p.Type == profile.TypeTUIC
 	if core == profile.CoreXray && (quic || startXray == nil) && startSingBox != nil {
 		return profile.CoreSingBox
 	}
-	if core == profile.CoreSingBox && (p.Transport.Network == "xhttp" || startSingBox == nil) && startXray != nil {
+	httpHeader := p.Transport.HeaderType == "http" && (p.Transport.Network == "" || p.Transport.Network == "tcp")
+	if core == profile.CoreSingBox && (p.Transport.Network == "xhttp" || httpHeader || startSingBox == nil) && startXray != nil {
 		return profile.CoreXray
 	}
 	return core

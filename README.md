@@ -14,7 +14,10 @@ A multi-account client for **SSH, VMess, VLESS, Trojan, Shadowsocks, Hysteria2 a
   - **xray** (built in): VMess / VLESS / Trojan / Shadowsocks, incl. `xhttp` (Hysteria2 and TUIC need sing-box)
   - **external**: run your own `sing-box` or `xray` binary with the generated config
   - SSH accounts on the xray core use the built-in SSH client (auto-reconnect, keepalive)
-- **proxy** mode: SOCKS5 + HTTP on `127.0.0.1:1080` (SOCKS5 only for xray / built-in SSH)
+  - an account that another core runs better is started on that core and the log says why: Hysteria2/TUIC
+    on sing-box, xhttp on Xray, and TCP with the HTTP header on Xray (sing-box only emulates that header,
+    and some servers refuse the emulation with "400 Bad Request")
+- **proxy** mode: SOCKS5 + HTTP on `127.0.0.1:1080` (SOCKS5 only for the built-in SSH client)
 - **LAN sharing**: listen on all interfaces, optionally with a username/password, so other devices can use the
   proxy; the log and the window show the exact addresses (e.g. `192.168.1.10:1080`) to enter on those devices
 - **tun** mode: a virtual network interface that routes the whole system through the tunnel (needs root / Administrator)

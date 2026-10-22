@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net"
 	"os"
 	"os/exec"
@@ -127,9 +128,17 @@ func TestRunThroughHelper(t *testing.T) {
 func TestHelperErrorIsReported(t *testing.T) {
 	inProcess(t)
 	p, s := testRequest(t)
-	p.Transport.Network = "xhttp" // sing-box can't do xhttp
-	err := Run(context.Background(), p, s, engine.Hooks{})
-	if err == nil || !strings.Contains(err.Error(), "xhttp") {
+	// The core can't start: its proxy port is taken. (A transport one core
+	// lacks no longer fails: the account is started on the other core.)
+	busy, err := net.Listen("tcp", fmt.Sprintf("127.0.0.1:%d", s.ListenPort))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer busy.Close()
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	err = Run(ctx, p, s, engine.Hooks{})
+	if err == nil || !strings.Contains(err.Error(), "address already in use") && !strings.Contains(err.Error(), "bind") {
 		t.Fatalf("expected the helper's error, got %v", err)
 	}
 }

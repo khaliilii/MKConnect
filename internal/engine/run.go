@@ -34,6 +34,10 @@ func Run(ctx context.Context, p profile.Profile, s profile.Settings, hooks Hooks
 	if err := s.Validate(); err != nil {
 		return fmt.Errorf("settings: %w", err)
 	}
+	if core := PreferredCore(&p, &s); core != s.Core {
+		log.Printf("ℹ️  %s runs on the %s core: %s", p.Name, core, coreReason(&p))
+		s.Core = core
+	}
 	if s.AllowLAN && s.ProxyUser == "" {
 		log.Printf("⚠️  LAN sharing is on without a proxy password: anyone on the network can use this proxy")
 	}
@@ -292,4 +296,17 @@ func withTUNHint(err error, tun bool) error {
 		return err
 	}
 	return fmt.Errorf("%w (%w)", err, errNeedsPrivileges)
+}
+
+// coreReason says why PreferredCore chose another core than configured.
+func coreReason(p *profile.Profile) string {
+	switch {
+	case p.Type == profile.TypeHysteria2 || p.Type == profile.TypeTUIC:
+		return p.Type + " needs sing-box"
+	case p.Transport.Network == "xhttp":
+		return "the xhttp transport needs Xray"
+	case p.Transport.HeaderType == "http":
+		return "Xray speaks the TCP HTTP header natively (sing-box only emulates it, which some servers refuse)"
+	}
+	return "the configured core is not in this build"
 }

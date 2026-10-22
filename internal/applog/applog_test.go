@@ -81,3 +81,41 @@ func TestPruneKeepsTheNewest(t *testing.T) {
 		t.Error("a log of another kind was deleted")
 	}
 }
+
+// TestLongRunMovesOn checks that a run that logs a lot continues in new files
+// instead of growing one without bound.
+func TestLongRunMovesOn(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("MKCONNECT_LOG_DIR", dir)
+	oldOut, oldErr, oldLog, oldMax := os.Stdout, os.Stderr, log.Writer(), maxFileSize
+	defer func() { os.Stdout, os.Stderr = oldOut, oldErr; log.SetOutput(oldLog); maxFileSize = oldMax }()
+	maxFileSize = 4 << 10
+
+	got := make(chan string, 1000)
+	if _, err := Start("big", func(line string) { got <- line }); err != nil {
+		t.Fatal(err)
+	}
+	line := strings.Repeat("x", 200)
+	for i := range 100 {
+		log.Printf("%d %s", i, line)
+	}
+	for range 100 {
+		select {
+		case <-got:
+		case <-time.After(5 * time.Second):
+			t.Fatal("lines did not arrive")
+		}
+	}
+	files, _ := filepath.Glob(filepath.Join(dir, "mkconnect-big-*.log"))
+	if len(files) < 3 {
+		t.Fatalf("20 KB of log with a 4 KB limit went into %d files, want several", len(files))
+	}
+	for _, f := range files {
+		if fi, _ := os.Stat(f); fi.Size() > maxFileSize+1024 {
+			t.Errorf("%s is %d bytes, over the limit", f, fi.Size())
+		}
+	}
+	if !strings.Contains(Path(), "mkconnect-big-") || Path() == files[0] && len(files) > 1 {
+		t.Errorf("Path() = %s should name the newest part", Path())
+	}
+}

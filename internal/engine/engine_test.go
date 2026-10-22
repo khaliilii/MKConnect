@@ -213,3 +213,33 @@ func TestTUNIPv6Setting(t *testing.T) {
 		t.Fatalf("IPv6 on: addresses %v, dns strategy %v", addrs, cfg["dns"].(obj)["strategy"])
 	}
 }
+
+// TestPreferredCore pins which core runs which account when sing-box is the
+// configured one (the default).
+func TestPreferredCore(t *testing.T) {
+	if startSingBox == nil || startXray == nil {
+		t.Skip("needs both cores")
+	}
+	sb := profile.Settings{Core: profile.CoreSingBox}
+	xr := profile.Settings{Core: profile.CoreXray}
+	cases := []struct {
+		name string
+		p    profile.Profile
+		s    profile.Settings
+		want string
+	}{
+		{"vless reality stays on sing-box", profile.Profile{Type: profile.TypeVLESS, TLS: profile.TLS{Mode: "reality"}}, sb, profile.CoreSingBox},
+		{"vmess ws stays on sing-box", profile.Profile{Type: profile.TypeVMess, Transport: profile.Transport{Network: "ws"}}, sb, profile.CoreSingBox},
+		{"tcp + http header moves to Xray", profile.Profile{Type: profile.TypeVMess, Transport: profile.Transport{HeaderType: "http"}}, sb, profile.CoreXray},
+		{"xhttp moves to Xray", profile.Profile{Type: profile.TypeVLESS, Transport: profile.Transport{Network: "xhttp"}}, sb, profile.CoreXray},
+		{"hysteria2 moves to sing-box", profile.Profile{Type: profile.TypeHysteria2}, xr, profile.CoreSingBox},
+		{"ssh keeps its core", profile.Profile{Type: profile.TypeSSH}, sb, profile.CoreSingBox},
+		{"external is never changed", profile.Profile{Type: profile.TypeVMess, Transport: profile.Transport{HeaderType: "http"}},
+			profile.Settings{Core: profile.CoreExternal}, profile.CoreExternal},
+	}
+	for _, c := range cases {
+		if got := PreferredCore(&c.p, &c.s); got != c.want {
+			t.Errorf("%s: got %s, want %s", c.name, got, c.want)
+		}
+	}
+}

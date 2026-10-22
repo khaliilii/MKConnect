@@ -31,7 +31,11 @@ import (
 	"github.com/khaliilii/MKConnect/internal/version"
 )
 
+// At most keepFiles files of a kind are kept, each up to maxFileSize: a long
+// run with debug logging moves on to a new file instead of filling the disk.
 const keepFiles = 20
+
+var maxFileSize int64 = 32 << 20
 
 var ansiEscape = regexp.MustCompile(`\x1b\[[0-9;]*m`)
 
@@ -126,12 +130,21 @@ func Start(kind string, sinks ...func(line string)) (string, error) {
 	go func() {
 		sc := bufio.NewScanner(r)
 		sc.Buffer(make([]byte, 64<<10), 1<<20)
+		var written int64
+		part, first := 1, ""
+		if file != nil {
+			first = file.Name()
+		}
 		for sc.Scan() {
 			raw := sc.Text()
 			orig.WriteString(raw + "\n") // the terminal keeps its colours
 			line := ansiEscape.ReplaceAllString(raw, "")
 			if file != nil {
-				file.WriteString(line + "\n")
+				n, _ := file.WriteString(line + "\n")
+				if written += int64(n); written > maxFileSize {
+					part++
+					file, written = nextPart(file, first, part), 0
+				}
 			}
 			for _, sink := range sinks {
 				sink(line)
@@ -142,6 +155,32 @@ func Start(kind string, sinks ...func(line string)) (string, error) {
 		return "", fmt.Errorf("log file: %w", err)
 	}
 	return Path(), nil
+}
+
+// nextPart closes a full log file and continues the run in its next part,
+// named after the run's first file ("...-150405.p02.log", which sorts after
+// "...-150405.log"). Returns nil (no more file logging) if it can't.
+func nextPart(full *os.File, first string, part int) *os.File {
+	full.Close()
+	path := strings.TrimSuffix(first, ".log") + fmt.Sprintf(".p%02d.log", part)
+	f, err := os.OpenFile(path, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o600)
+	if err != nil {
+		return nil
+	}
+	fmt.Fprintf(f, "MKConnect %s, continued from %s (part %d)\n", version.Version, filepath.Base(first), part)
+	debug.SetCrashOutput(f, debug.CrashOptions{})
+	mu.Lock()
+	current = f.Name()
+	mu.Unlock()
+	prune(filepath.Dir(first), kindOf(first))
+	return f
+}
+
+// kindOf is the kind in a log file's name ("mkconnect-app-....log" -> "app").
+func kindOf(path string) string {
+	name := strings.TrimPrefix(filepath.Base(path), "mkconnect-")
+	kind, _, _ := strings.Cut(name, "-")
+	return kind
 }
 
 // prune deletes the oldest log files of a kind beyond keepFiles.

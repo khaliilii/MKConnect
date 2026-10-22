@@ -24,6 +24,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"log"
 	"os"
 	"path/filepath"
@@ -328,10 +329,18 @@ func tailLog(path string) func() {
 				}
 				f.Seek(offset, 0)
 			}
+			out := log.Writer()
+			if writesTo(out, f) {
+				// The log goes into the very file being followed (the helper
+				// runs in this process, as in tests): copying it would feed
+				// the file into itself without end. It is already in the log.
+				f.Seek(0, io.SeekEnd)
+				continue
+			}
 			for {
 				n, err := f.Read(buf)
 				if n > 0 {
-					log.Writer().Write(buf[:n])
+					out.Write(buf[:n])
 				}
 				if err != nil || n == 0 {
 					break
@@ -340,6 +349,17 @@ func tailLog(path string) func() {
 		}
 	}()
 	return func() { close(done) }
+}
+
+// writesTo reports whether w writes into the same file as f.
+func writesTo(w io.Writer, f *os.File) bool {
+	wf, ok := w.(*os.File)
+	if !ok {
+		return false
+	}
+	a, err1 := wf.Stat()
+	b, err2 := f.Stat()
+	return err1 == nil && err2 == nil && os.SameFile(a, b)
 }
 
 // Serve is the privileged helper: it runs requests until told to quit or

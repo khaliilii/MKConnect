@@ -52,9 +52,11 @@ func newSession(p *profile.Profile, s *profile.Settings, primary Engine) *Sessio
 		core = "external " + s.ExternalKind
 	}
 
-	proxy := "SOCKS5"
-	if strings.HasPrefix(core, profile.CoreSingBox) || core == "external "+profile.CoreSingBox {
-		proxy = "SOCKS5 + HTTP"
+	// sing-box's mixed inbound and Xray's socks inbound both answer HTTP
+	// proxy requests too; only the built-in SSH client is SOCKS5 alone.
+	proxy := "SOCKS5 + HTTP"
+	if core == "ssh (built-in)" {
+		proxy = "SOCKS5"
 	}
 	addr := net.JoinHostPort(s.ListenAddress(), strconv.Itoa(s.ListenPort))
 	inbounds := []string{fmt.Sprintf("%s %s", proxy, addr)}
@@ -92,13 +94,13 @@ func newSession(p *profile.Profile, s *profile.Settings, primary Engine) *Sessio
 	return session
 }
 
-// ProxyProtocols names what the local proxy speaks: the built-in SSH client
-// and Xray serve SOCKS5 only, sing-box also HTTP.
+// ProxyProtocols names what the local proxy speaks: SOCKS5 and HTTP, except
+// for the built-in SSH client, which serves SOCKS5 only.
 func (s *Session) ProxyProtocols() string {
-	if strings.HasPrefix(s.Core, profile.CoreSingBox) || s.Core == "external "+profile.CoreSingBox {
-		return "SOCKS5 + HTTP"
+	if s.Core == "ssh (built-in)" {
+		return "SOCKS5"
 	}
-	return "SOCKS5"
+	return "SOCKS5 + HTTP"
 }
 
 // LANAddresses returns the addresses other devices on the network can use as

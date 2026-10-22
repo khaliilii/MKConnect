@@ -4,6 +4,7 @@ package engine
 
 import (
 	"context"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -68,5 +69,28 @@ func TestRunReportsHealth(t *testing.T) {
 	dead.Name, dead.Port = "dead", freePort(t) // nothing listens there
 	if err := run(dead); err == nil {
 		t.Fatal("a dead server was reported as working")
+	}
+}
+
+// TestExplainFailure checks that the cores' many ways of saying the same few
+// things reach the user as one plain sentence each, with the original kept.
+func TestExplainFailure(t *testing.T) {
+	cases := []struct{ raw, want string }{
+		{`Get "https://www.gstatic.com/generate_204": EOF`, "closes every connection"},
+		{"socks connect tcp 127.0.0.1:1080->www.gstatic.com:443: unknown error general SOCKS server failure", "closes every connection"},
+		{"read tcp 1.2.3.4:5->6.7.8.9:443: read: connection reset by peer", "closes every connection"},
+		{"context deadline exceeded (Client.Timeout exceeded while awaiting headers)", "doesn't answer"},
+		{"dial tcp 127.0.0.1:1: connect: connection refused", "nothing answers"},
+		{"lookup nowhere.example: no such host", "can't be resolved"},
+		{"tls: failed to verify certificate: x509: certificate signed by unknown authority", "TLS handshake failed"},
+	}
+	for _, c := range cases {
+		err := explainFailure(errors.New(c.raw))
+		if !strings.Contains(err.Error(), c.want) {
+			t.Errorf("%q\n  explained as %q, want it to say %q", c.raw, err, c.want)
+		}
+		if d := failureDetail(err); d == "" && c.want != "doesn't answer" {
+			t.Errorf("%q: the original error is lost for the log", c.raw)
+		}
 	}
 }

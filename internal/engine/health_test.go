@@ -25,9 +25,10 @@ func TestRunReportsHealth(t *testing.T) {
 		w.WriteHeader(http.StatusNoContent)
 	}))
 	defer srv.Close()
-	old := LatencyURL
+	old, oldFallback := LatencyURL, FallbackURLs
 	LatencyURL = strings.Replace(srv.URL, "127.0.0.1", "localhost", 1) + "/generate_204"
-	defer func() { LatencyURL = old }()
+	FallbackURLs = nil // no real internet in tests
+	defer func() { LatencyURL, FallbackURLs = old, oldFallback }()
 
 	serverPort := freePort(t)
 	startProtocolServer(t, []obj{{
@@ -92,5 +93,52 @@ func TestExplainFailure(t *testing.T) {
 		if d := failureDetail(err); d == "" && c.want != "doesn't answer" {
 			t.Errorf("%q: the original error is lost for the log", c.raw)
 		}
+	}
+}
+
+// TestProbeSurvivesOneBlockedTarget is the case a full test found: a server
+// that refuses gstatic.com but carries everything else must not be reported
+// as dead (and reconnected over and over).
+func TestProbeSurvivesOneBlockedTarget(t *testing.T) {
+	blocked := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		hj, _ := w.(http.Hijacker)
+		conn, _, _ := hj.Hijack()
+		conn.Close() // what a server that refuses the destination looks like: EOF
+	}))
+	defer blocked.Close()
+	hanging := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		<-r.Context().Done()
+	}))
+	defer hanging.Close()
+	works := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	defer works.Close()
+
+	old, oldFallback, oldHedge := LatencyURL, FallbackURLs, probeHedge
+	defer func() { LatencyURL, FallbackURLs, probeHedge = old, oldFallback, oldHedge }()
+	probeHedge = 200 * time.Millisecond
+	c := &http.Client{Timeout: 5 * time.Second}
+
+	// The main target closes the connection; a fallback answers.
+	LatencyURL, FallbackURLs = blocked.URL, []string{blocked.URL + "/again", works.URL}
+	if _, err := probeAny(t.Context(), c); err != nil {
+		t.Fatalf("one blocked target made a working connection look dead: %v", err)
+	}
+
+	// The main target hangs; the fallbacks are tried before the time is up.
+	LatencyURL, FallbackURLs = hanging.URL, []string{works.URL}
+	start := time.Now()
+	if _, err := probeAny(t.Context(), c); err != nil {
+		t.Fatalf("a hanging target made a working connection look dead: %v", err)
+	}
+	if time.Since(start) > 2*time.Second {
+		t.Errorf("the fallback waited for the hanging target: %v", time.Since(start))
+	}
+
+	// Everything fails: the main target's error is reported.
+	LatencyURL, FallbackURLs = blocked.URL, []string{blocked.URL + "/x"}
+	if _, err := probeAny(t.Context(), c); err == nil {
+		t.Fatal("all targets failing was reported as working")
 	}
 }

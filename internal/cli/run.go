@@ -10,6 +10,7 @@ import (
 	"github.com/common-nighthawk/go-figure"
 	"github.com/spf13/cobra"
 
+	"github.com/khaliilii/MKConnect/internal/applog"
 	"github.com/khaliilii/MKConnect/internal/engine"
 	"github.com/khaliilii/MKConnect/internal/profile"
 )
@@ -72,6 +73,11 @@ func newRunCmd() *cobra.Command {
 			}
 
 			figure.NewFigure("MKConnect", "small", true).Print()
+			if path, err := applog.Start("cli"); err != nil {
+				log.Printf("⚠️  the log is not saved to a file: %v", err)
+			} else {
+				log.Printf("📝 this run's log is saved to %s", path)
+			}
 
 			ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 			defer stop()

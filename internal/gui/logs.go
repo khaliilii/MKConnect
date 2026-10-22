@@ -1,11 +1,9 @@
 package gui
 
 import (
-	"bufio"
-	"log"
 	"math"
-	"os"
-	"regexp"
+	"net/url"
+	"path/filepath"
 	"strings"
 	"sync"
 	"time"
@@ -15,11 +13,11 @@ import (
 	"fyne.io/fyne/v2/dialog"
 	"fyne.io/fyne/v2/theme"
 	"fyne.io/fyne/v2/widget"
+
+	"github.com/khaliilii/MKConnect/internal/applog"
 )
 
 const maxLogLines = 2000
-
-var ansiEscape = regexp.MustCompile(`\x1b\[[0-9;]*m`)
 
 // logLevels are the core log levels, least to most verbose.
 var logLevels = []string{"error", "warn", "info", "debug", "trace"}
@@ -58,29 +56,6 @@ func (b *logBuffer) clear() {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	b.lines, b.dirty = nil, true
-}
-
-// captureOutput redirects stdout, stderr and the standard logger into buf, so
-// messages from the cores (which write to the process streams) show up in the
-// window. Lines are still echoed to the original stderr.
-func captureOutput(buf *logBuffer) {
-	r, w, err := os.Pipe()
-	if err != nil {
-		log.Printf("log capture disabled: %v", err)
-		return
-	}
-	orig := os.Stderr
-	os.Stdout, os.Stderr = w, w
-	log.SetOutput(w)
-	go func() {
-		sc := bufio.NewScanner(r)
-		sc.Buffer(make([]byte, 64<<10), 1<<20)
-		for sc.Scan() {
-			line := sc.Text()
-			orig.WriteString(line + "\n")
-			buf.add(ansiEscape.ReplaceAllString(line, ""))
-		}
-	}()
 }
 
 // newLogView returns the log panel: wrapped lines, a search box, a log level
@@ -190,7 +165,26 @@ func (u *ui) newLogView() fyne.CanvasObject {
 	title := widget.NewLabelWithStyle("Logs", fyne.TextAlignLeading, fyne.TextStyle{Bold: true})
 	tools := container.NewHBox(widget.NewLabel("Level"), level, widget.NewLabel("Follow"), autoScroll, copyAll, clear)
 	header := container.NewBorder(nil, nil, title, tools, search)
-	return container.NewBorder(header, nil, nil, nil, list)
+
+	// Every run is also kept in a file, to look at (or send) after the fact.
+	var footer fyne.CanvasObject
+	if path := applog.Path(); path != "" {
+		where := widget.NewLabel("Saved to " + path)
+		where.SizeName = theme.SizeNameCaptionText
+		where.Truncation = fyne.TextTruncateEllipsis
+		open := widget.NewButtonWithIcon("", theme.FolderOpenIcon(), func() {
+			dir := filepath.ToSlash(filepath.Dir(path))
+			if !strings.HasPrefix(dir, "/") {
+				dir = "/" + dir // C:/Users/... -> file:///C:/Users/...
+			}
+			if err := u.app.OpenURL(&url.URL{Scheme: "file", Path: dir}); err != nil {
+				u.logf("⚠️  could not open %s: %v", filepath.Dir(path), err)
+			}
+		})
+		open.Importance = widget.LowImportance
+		footer = container.NewBorder(nil, nil, nil, open, where)
+	}
+	return container.NewBorder(header, footer, nil, nil, list)
 }
 
 // logRowHeight measures how tall a wrapped log line is at the list's current

@@ -18,6 +18,7 @@ import (
 	"fyne.io/fyne/v2/theme"
 	"fyne.io/fyne/v2/widget"
 
+	"github.com/khaliilii/MKConnect/internal/applog"
 	"github.com/khaliilii/MKConnect/internal/elevate"
 	"github.com/khaliilii/MKConnect/internal/engine"
 	"github.com/khaliilii/MKConnect/internal/profile"
@@ -94,7 +95,11 @@ type ui struct {
 // Run starts the GUI and blocks until the app quits.
 func Run(icon []byte) {
 	logs := &logBuffer{}
-	captureOutput(logs)
+	if path, err := applog.Start("app", logs.add); err != nil {
+		log.Printf("⚠️  the log is not saved to a file: %v", err)
+	} else {
+		log.Printf("📝 this run's log is saved to %s", path)
+	}
 
 	a := app.NewWithID("com.khaliilii.mkconnect")
 	a.Lifecycle().SetOnStopped(elevate.Shutdown) // the privileged TUN helper, if any

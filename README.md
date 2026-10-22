@@ -54,6 +54,11 @@ A multi-account client for **SSH, VMess, VLESS, Trojan, Shadowsocks, Hysteria2 a
   internet through the tunnel, or "no internet" with the reason when the core runs but nothing gets through
 - **auto-reconnect** (on by default): a connection that drops, or that stops carrying traffic for two checks
   (45 s apart), is started again with a growing delay, up to ten attempts; a working connection resets the count
+- **log files**: every run's complete log (the app's messages, the cores' output and a crash report if it
+  crashes) is saved to a `logs` folder next to the program, or, where that can't be written (Program Files,
+  a macOS app bundle, /usr/bin), to the user's config folder (`%AppData%\mkconnect\logs`,
+  `~/Library/Application Support/mkconnect/logs`, `~/.config/mkconnect/logs`); `MKCONNECT_LOG_DIR` overrides
+  it. The newest 20 are kept; the log panel shows the file and opens its folder. `mkconnect run` does the same.
 - a tray icon that keeps the connection running when the window is closed, and an About page
 
 TUN mode (and gateway sharing) need administrator rights to create the virtual interface. The app itself runs

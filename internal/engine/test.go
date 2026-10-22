@@ -26,10 +26,79 @@ type TestOptions struct {
 
 // Test endpoints, overridable in tests. The latency probe is HTTPS, so a
 // server that only passes plain HTTP doesn't look usable.
+//
+// FallbackURLs are tried together with LatencyURL: some servers block single
+// destinations (a provider refusing gstatic.com or speed tests to save
+// bandwidth) while the rest of the internet works through them, and one
+// blocked probe target must not make a working server look dead.
 var (
-	LatencyURL = "https://www.gstatic.com/generate_204"
-	SpeedURL   = "https://speed.cloudflare.com/__down?bytes=25000000"
+	LatencyURL   = "https://www.gstatic.com/generate_204"
+	FallbackURLs = []string{
+		"https://cp.cloudflare.com/generate_204",
+		"https://www.apple.com/library/test/success.html",
+		"https://www.msftconnecttest.com/connecttest.txt",
+	}
+	SpeedURL = "https://speed.cloudflare.com/__down?bytes=25000000"
 )
+
+// probeHedge is how long the main target gets before the fallbacks are
+// tried too (a blocked target often hangs instead of failing).
+var probeHedge = 3 * time.Second
+
+// probeAny probes LatencyURL and, when that fails or is slow to answer, the
+// fallbacks as well, returning the first answer. In the usual case it sends
+// one request, so measured latencies stay comparable. It fails only when
+// every target fails, with the main target's error.
+func probeAny(ctx context.Context, c *http.Client) (time.Duration, error) {
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
+	type result struct {
+		main bool
+		d    time.Duration
+		err  error
+	}
+	results := make(chan result, 1+len(FallbackURLs))
+	go func() {
+		d, err := probe(ctx, c, LatencyURL)
+		results <- result{true, d, err}
+	}()
+
+	pending := 1
+	var mainErr error
+	select {
+	case r := <-results:
+		if r.err == nil {
+			return r.d, nil
+		}
+		mainErr, pending = r.err, 0
+	case <-time.After(probeHedge):
+	case <-ctx.Done():
+		return 0, ctx.Err()
+	}
+	for _, u := range FallbackURLs {
+		pending++
+		go func() {
+			d, err := probe(ctx, c, u)
+			results <- result{false, d, err}
+		}()
+	}
+	var firstErr error
+	for ; pending > 0; pending-- {
+		r := <-results
+		switch {
+		case r.err == nil:
+			return r.d, nil
+		case r.main:
+			mainErr = r.err
+		case firstErr == nil:
+			firstErr = r.err
+		}
+	}
+	if mainErr == nil {
+		mainErr = firstErr
+	}
+	return 0, mainErr
+}
 
 // Test starts the profile on a private local port, measures it through the
 // proxy and stops it again. It doesn't touch the system and can run while
@@ -80,7 +149,7 @@ func Test(ctx context.Context, p profile.Profile, s profile.Settings, o TestOpti
 		if ctx.Err() != nil {
 			return fail(ctx.Err())
 		}
-		d, err := probe(ctx, client, LatencyURL)
+		d, err := probeAny(ctx, client)
 		if err != nil {
 			lastErr = err
 			continue

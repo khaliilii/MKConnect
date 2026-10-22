@@ -33,7 +33,7 @@ func CheckHealth(ctx context.Context, s profile.Settings) (time.Duration, error)
 	defer cancel()
 	c := healthClient(&s)
 	defer c.CloseIdleConnections()
-	d, err := probe(ctx, c, LatencyURL)
+	d, err := probeAny(ctx, c)
 	if err != nil && ctx.Err() != context.Canceled {
 		return 0, explainFailure(err)
 	}

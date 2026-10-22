@@ -22,9 +22,9 @@ func TestServerTest(t *testing.T) {
 	}))
 	defer srv.Close()
 	base := strings.Replace(srv.URL, "127.0.0.1", "localhost", 1) // names resolve through the proxy
-	oldLatency, oldSpeed := LatencyURL, SpeedURL
-	LatencyURL, SpeedURL = base+"/generate_204", base+"/down"
-	defer func() { LatencyURL, SpeedURL = oldLatency, oldSpeed }()
+	oldLatency, oldSpeed, oldFallback := LatencyURL, SpeedURL, FallbackURLs
+	LatencyURL, SpeedURL, FallbackURLs = base+"/generate_204", base+"/down", nil
+	defer func() { LatencyURL, SpeedURL, FallbackURLs = oldLatency, oldSpeed, oldFallback }()
 
 	port := freePort(t)
 	startProtocolServer(t, []obj{{

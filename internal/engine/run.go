@@ -80,6 +80,10 @@ func Run(ctx context.Context, p profile.Profile, s profile.Settings, hooks Hooks
 		defer end() // runs last: after the cores and the gateway have restored everything
 	}
 
+	if s.Mode == profile.ModeTUN {
+		// Runs after the cores have closed (defers run in reverse order).
+		defer flushDNSCache("the tunnel is down: its answers are no use without it")
+	}
 	shown := p // start may pin the server to an IP; show what the user configured
 	engines, err := start(ctx, &p, &s)
 	defer func() {
@@ -110,6 +114,17 @@ func Run(ctx context.Context, p profile.Profile, s profile.Settings, hooks Hooks
 		for _, w := range gateway.Diagnose(s.ShareInterfaces, TUNName) {
 			log.Printf("   ⚠️  %s", w)
 		}
+	}
+
+	if s.Mode == profile.ModeTUN {
+		// Registered after the cores' close: runs first, so the system's DNS
+		// is back on its own servers before the tunnel it pointed into goes.
+		restoreDNS, err := pointSystemDNSIntoTunnel()
+		if err != nil {
+			log.Printf("⚠️  system DNS left as it is: %v", err)
+		}
+		defer restoreDNS()
+		flushDNSCache("the tunnel is up: answers cached before it may be the filter's")
 	}
 
 	session := newSession(&shown, &s, engines[0])
@@ -150,7 +165,15 @@ func start(ctx context.Context, p *profile.Profile, s *profile.Settings) ([]Engi
 	if s.Core == profile.CoreSingBox || (s.Core == profile.CoreExternal && s.ExternalKind == profile.CoreSingBox) {
 		var tunOpts *tunOptions
 		if tun {
-			tunOpts = &tunOptions{Gateway: len(s.ShareInterfaces) > 0}
+			// The server's address is looked up now, while the system resolver
+			// still answers by itself: once the TUN is up, the system's DNS
+			// points into the tunnel (see pointSystemDNSIntoTunnel), and a
+			// lookup of the server through the tunnel would wait for itself.
+			exclude, err := pinServer(ctx, p)
+			if err != nil {
+				return nil, err
+			}
+			tunOpts = &tunOptions{ExcludeAddrs: exclude, Gateway: len(s.ShareInterfaces) > 0}
 		}
 		cfg, err := singBoxConfig(p, s, tunOpts)
 		if err != nil {
@@ -261,7 +284,9 @@ func pinServer(ctx context.Context, p *profile.Profile) ([]string, error) {
 		return nil, fmt.Errorf("resolve %s: no addresses", p.Server)
 	}
 	host := p.Server
-	if p.TLS.Mode != "" && p.TLS.SNI == "" {
+	// QUIC protocols always use TLS, whatever TLS.Mode says.
+	quic := p.Type == profile.TypeHysteria2 || p.Type == profile.TypeTUIC
+	if (p.TLS.Mode != "" || quic) && p.TLS.SNI == "" {
 		p.TLS.SNI = host
 	}
 	switch p.Transport.Network {

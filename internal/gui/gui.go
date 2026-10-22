@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"time"
 
 	"fyne.io/fyne/v2"
@@ -128,6 +129,7 @@ func Run(icon []byte) {
 	}
 
 	u.build()
+	u.checkLeftoverDNS()
 	u.autoUpdateSubscriptions()
 	// Like Hiddify: pick up share links copied while the app was in the background.
 	a.Lifecycle().SetOnEnteredForeground(u.checkClipboard)
@@ -254,4 +256,42 @@ func (u *ui) save() {
 	if err := u.store.Save(); err != nil {
 		dialog.ShowError(fmt.Errorf("save profiles: %w", err), u.win)
 	}
+}
+
+// RepairDNSFlag makes the executable put back a DNS setting left by an
+// interrupted TUN connection (run with administrator rights).
+const RepairDNSFlag = "--repair-dns"
+
+// checkLeftoverDNS notices DNS settings an interrupted TUN connection left
+// pointing into its tunnel (macOS: a crash, a forced quit or a power cut
+// before it could clean up). Until they are put back, no website opens, in
+// any mode, so the app says so and offers to repair it.
+func (u *ui) checkLeftoverDNS() {
+	left := engine.LeftoverTunnelDNS()
+	if len(left) == 0 {
+		return
+	}
+	u.logf("⚠️  the DNS of %s still points into a tunnel that is gone", strings.Join(left, ", "))
+	msg := fmt.Sprintf("A VPN connection that was interrupted left the DNS of %s pointing into its tunnel, "+
+		"so no website can be opened. Put it back now? macOS will ask for your password.", strings.Join(left, ", "))
+	dialog.ShowConfirm("Repair the DNS settings", msg, func(ok bool) {
+		if !ok {
+			return
+		}
+		go func() {
+			out, err := elevate.RunElevated("MKConnect needs administrator rights to restore your DNS settings.", RepairDNSFlag)
+			fyne.Do(func() {
+				if err != nil {
+					dialog.ShowError(fmt.Errorf("could not restore the DNS: %w", err), u.win)
+					return
+				}
+				for _, line := range strings.Split(out, "\n") {
+					if strings.HasPrefix(line, "restored:") { // not the toolkit's own start-up noise
+						u.logf("🧹 %s", line)
+					}
+				}
+				dialog.ShowInformation("DNS restored", "Websites open normally again.", u.win)
+			})
+		}()
+	}, u.win)
 }

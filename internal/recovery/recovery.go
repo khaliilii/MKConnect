@@ -33,6 +33,10 @@ type Journal struct {
 
 	// Linux: policy routing rules present before the TUN started.
 	Rules []Rule `json:"rules,omitempty"`
+
+	// macOS: the DNS servers of each network service before the TUN pointed
+	// them into the tunnel ("Empty" = none set, i.e. from DHCP).
+	MacDNS map[string]string `json:"mac_dns,omitempty"`
 }
 
 // Rule identifies a policy routing rule.

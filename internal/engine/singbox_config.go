@@ -19,6 +19,10 @@ const (
 	tagRemote = "remote"
 )
 
+// blockPageCIDRs are the addresses a national filter answers blocked names
+// with (Iran's "peyvandha" page).
+var blockPageCIDRs = []string{"10.10.34.0/24"}
+
 var privateCIDRs = []string{
 	"127.0.0.0/8", "10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16", "169.254.0.0/16",
 	"::1/128", "fc00::/7", "fe80::/10",
@@ -148,6 +152,12 @@ func singBoxBase(s *profile.Settings, proxyOut obj, tun *tunOptions) obj {
 		rules = append([]obj{
 			{"action": "sniff"},
 			{"protocol": "dns", "action": "hijack-dns"},
+			// A name answered by a filtering resolver before the tunnel came up
+			// points at the filter's block page (Iran: 10.10.34.34-36). Being a
+			// private address it would go out directly and hang for ~20 s;
+			// refused at once, the browser looks the name up again, through
+			// the tunnel.
+			{"ip_cidr": blockPageCIDRs, "action": "reject"},
 		}, rules...)
 	}
 

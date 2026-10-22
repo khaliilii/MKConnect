@@ -69,6 +69,14 @@ as a normal user: when you connect in TUN mode it asks the system for permission
 the Windows UAC prompt or polkit on Linux) and runs only the tunnel in a small elevated helper, which stops
 when you disconnect or quit the app.
 
+On macOS, TUN mode also points the system's DNS into the tunnel while it runs (every network service's DNS is
+set to 172.19.77.2, inside the TUN, and put back on disconnect; the original is journaled). Routing alone isn't
+enough there: macOS keeps sending its own DNS queries out the Wi-Fi, where a filtering network answers blocked
+names with its block page (Iran: 10.10.34.36), so browsers couldn't open blocked sites through a working tunnel.
+The system DNS cache is flushed when the tunnel comes up and when it goes down (also on Windows and Linux), and
+connections to the block page address are refused at once instead of hanging. If a connection is killed before
+it can clean up (a crash, a power cut), the app notices the leftover DNS setting at start and offers to repair it.
+
 Disconnecting restores the network configuration exactly (interfaces, routes, policy rules, firewall,
 IP forwarding, DNS). If MKConnect is killed while connected, the next TUN connection undoes what it left
 behind, or run `sudo mkconnect cleanup`. `scripts/test-tun-linux.sh` checks all of this end to end: that

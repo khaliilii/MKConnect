@@ -3,6 +3,7 @@ package engine
 import (
 	"net"
 	"runtime"
+	"slices"
 	"strconv"
 	"strings"
 	"testing"
@@ -159,6 +160,23 @@ func TestPinServerKeepsHostname(t *testing.T) {
 	}
 }
 
+// TestPinServerKeepsQUICName: Hysteria2/TUIC always speak TLS, so pinning
+// their server to an address must keep the name for the handshake.
+func TestPinServerKeepsQUICName(t *testing.T) {
+	for _, typ := range []string{profile.TypeHysteria2, profile.TypeTUIC} {
+		p := profile.Profile{Type: typ, Server: "localhost", Port: 443}
+		if _, err := pinServer(t.Context(), &p); err != nil {
+			t.Fatal(err)
+		}
+		if net.ParseIP(p.Server) == nil || p.TLS.SNI != "localhost" {
+			t.Errorf("%s: server %q, SNI %q: want an address and the name kept as SNI", typ, p.Server, p.TLS.SNI)
+		}
+		if tls := quicTLS(&p, nil); tls["server_name"] != "localhost" {
+			t.Errorf("%s: the QUIC handshake would use %v", typ, tls["server_name"])
+		}
+	}
+}
+
 func TestTUNGatewayConfig(t *testing.T) {
 	s := testSettings(t)
 	s.Mode, s.ShareInterfaces = profile.ModeTUN, []string{"eth1"}
@@ -240,6 +258,38 @@ func TestPreferredCore(t *testing.T) {
 	for _, c := range cases {
 		if got := PreferredCore(&c.p, &c.s); got != c.want {
 			t.Errorf("%s: got %s, want %s", c.name, got, c.want)
+		}
+	}
+}
+
+// TestTUNRefusesTheBlockPage: in TUN mode a connection to the filter's block
+// page (what a poisoned DNS answer points to) is refused, not sent out
+// directly as a private address, and the rule comes before the private one.
+func TestTUNRefusesTheBlockPage(t *testing.T) {
+	s := testSettings(t)
+	cfg, err := singBoxConfig(&testProfiles[0], &s, &tunOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	rules := cfg["route"].(obj)["rules"].([]obj)
+	reject, private := -1, -1
+	for i, r := range rules {
+		if r["action"] == "reject" && slices.Contains(r["ip_cidr"].([]string), "10.10.34.0/24") {
+			reject = i
+		}
+		if r["ip_is_private"] == true {
+			private = i
+		}
+	}
+	if reject < 0 || private < 0 || reject > private {
+		t.Fatalf("block page rule at %d, private rule at %d: want the block page refused first\n%v", reject, private, rules)
+	}
+
+	// Proxy mode has no such rule: apps send names, not addresses.
+	plain, _ := singBoxConfig(&testProfiles[0], &s, nil)
+	for _, r := range plain["route"].(obj)["rules"].([]obj) {
+		if r["action"] == "reject" {
+			t.Fatalf("proxy mode refuses addresses: %v", r)
 		}
 	}
 }

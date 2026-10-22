@@ -247,7 +247,9 @@ func TestPreferredCore(t *testing.T) {
 		want string
 	}{
 		{"vless reality stays on sing-box", profile.Profile{Type: profile.TypeVLESS, TLS: profile.TLS{Mode: "reality"}}, sb, profile.CoreSingBox},
-		{"vmess ws stays on sing-box", profile.Profile{Type: profile.TypeVMess, Transport: profile.Transport{Network: "ws"}}, sb, profile.CoreSingBox},
+		{"vmess ws moves to Xray", profile.Profile{Type: profile.TypeVMess, Transport: profile.Transport{Network: "ws"}}, sb, profile.CoreXray},
+		{"vless grpc stays on sing-box", profile.Profile{Type: profile.TypeVLESS, Transport: profile.Transport{Network: "grpc"}}, sb, profile.CoreSingBox},
+		{"trojan over plain TLS stays on sing-box", profile.Profile{Type: profile.TypeTrojan, TLS: profile.TLS{Mode: "tls"}}, sb, profile.CoreSingBox},
 		{"tcp + http header moves to Xray", profile.Profile{Type: profile.TypeVMess, Transport: profile.Transport{HeaderType: "http"}}, sb, profile.CoreXray},
 		{"xhttp moves to Xray", profile.Profile{Type: profile.TypeVLESS, Transport: profile.Transport{Network: "xhttp"}}, sb, profile.CoreXray},
 		{"hysteria2 moves to sing-box", profile.Profile{Type: profile.TypeHysteria2}, xr, profile.CoreSingBox},

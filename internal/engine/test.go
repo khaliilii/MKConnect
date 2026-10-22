@@ -189,8 +189,15 @@ func Test(ctx context.Context, p profile.Profile, s profile.Settings, o TestOpti
 //     only emulates it with its HTTP transport, and some Xray servers answer
 //     that with "400 Bad Request" (a full test found one refusing 7 of 8
 //     requests that Xray carried), so Xray runs them when it is available.
-//     Its proxy port serves HTTP as well as SOCKS5, so nothing changes for
-//     the apps that use it.
+//   - The same over WebSocket and HTTP upgrade, which reach the server
+//     through an HTTP front end (often a CDN): when one of the front end's
+//     backends fails, half the handshakes get "503". Xray dials each
+//     connection up to 5 times; sing-box tries once, and with half of a
+//     page's connections failing, no page loads although traffic flows
+//     (measured from Iran: 3-5 of 10 requests on sing-box, 8-10 on Xray).
+//
+// Xray's proxy port serves HTTP as well as SOCKS5, so nothing changes for the
+// apps that use it.
 func PreferredCore(p *profile.Profile, s *profile.Settings) string {
 	core := s.Core
 	if core == profile.CoreExternal || p.Type == profile.TypeSSH {
@@ -201,7 +208,10 @@ func PreferredCore(p *profile.Profile, s *profile.Settings) string {
 		return profile.CoreSingBox
 	}
 	httpHeader := p.Transport.HeaderType == "http" && (p.Transport.Network == "" || p.Transport.Network == "tcp")
-	if core == profile.CoreSingBox && (p.Transport.Network == "xhttp" || httpHeader || startSingBox == nil) && startXray != nil {
+	// Not gRPC: Xray's gRPC client doesn't work with sing-box's own gRPC
+	// servers, and gRPC showed no such failures.
+	httpFront := slices.Contains([]string{"ws", "httpupgrade", "xhttp"}, p.Transport.Network)
+	if core == profile.CoreSingBox && (httpFront || httpHeader || startSingBox == nil) && startXray != nil {
 		return profile.CoreXray
 	}
 	return core

@@ -7,6 +7,7 @@ import (
 	"log"
 	"net/http"
 	"net/url"
+	"runtime"
 	"strings"
 	"time"
 
@@ -76,21 +77,32 @@ func explainFailure(err error) error {
 	return &probeFailure{Meaning: meaning, Detail: detail}
 }
 
-// healthClient sends requests through the connection's own local proxy, with
-// the proxy password when one is set.
+// healthClient sends the probes the way the user's traffic goes. In proxy
+// mode that is the connection's local proxy (with its password, if any). In
+// TUN mode on a desktop it is the system's own path — routing into the TUN
+// and the system resolver — because that is what browsers use: probing the
+// local proxy there checked the core but not the TUN in front of it, and a
+// TUN that carried nothing looked healthy. The phone app is left out of its
+// own VPN (so the core's sockets don't loop), so there the proxy is probed.
 func healthClient(s *profile.Settings) *http.Client {
-	proxy := &url.URL{Scheme: "socks5", Host: fmt.Sprintf("127.0.0.1:%d", s.ListenPort)}
-	if s.ProxyUser != "" {
-		proxy.User = url.UserPassword(s.ProxyUser, s.ProxyPass)
+	tr := &http.Transport{DisableKeepAlives: true}
+	if s.Mode != profile.ModeTUN || !probeThroughSystem {
+		proxy := &url.URL{Scheme: "socks5", Host: fmt.Sprintf("127.0.0.1:%d", s.ListenPort)}
+		if s.ProxyUser != "" {
+			proxy.User = url.UserPassword(s.ProxyUser, s.ProxyPass)
+		}
+		tr.Proxy = http.ProxyURL(proxy)
 	}
 	return &http.Client{
-		Transport: &http.Transport{
-			Proxy:             http.ProxyURL(proxy),
-			DisableKeepAlives: true,
-		},
+		Transport:     tr,
 		CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse },
 	}
 }
+
+// probeThroughSystem is whether TUN mode is probed through the system's path
+// (desktops) rather than the local proxy (the phone app, which its own VPN
+// leaves out).
+var probeThroughSystem = runtime.GOOS != "android"
 
 // A fresh connection often needs a few seconds before traffic flows (the
 // first handshakes through a filtered network stall), and a single check can

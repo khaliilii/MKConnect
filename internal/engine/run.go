@@ -335,6 +335,8 @@ func coreReason(p *profile.Profile) string {
 		return "the xhttp transport needs Xray"
 	case p.Transport.HeaderType == "http":
 		return "Xray speaks the TCP HTTP header natively (sing-box only emulates it, which some servers refuse)"
+	case p.Transport.Network == "ws", p.Transport.Network == "httpupgrade":
+		return "Xray retries a handshake an HTTP front end (a CDN) refused; sing-box gives the connection up"
 	}
 	return "the configured core is not in this build"
 }

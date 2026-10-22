@@ -197,3 +197,23 @@ func TestSlowStartIsNotReportedAsDead(t *testing.T) {
 		t.Fatal("no report for a dead connection")
 	}
 }
+
+// TestHealthProbesTheUsersPath: proxy mode probes the local proxy, TUN mode
+// on a desktop goes the system's way (into the TUN), like a browser.
+func TestHealthProbesTheUsersPath(t *testing.T) {
+	proxyMode := profile.Settings{Mode: profile.ModeProxy, ListenPort: 1080}
+	if healthClient(&proxyMode).Transport.(*http.Transport).Proxy == nil {
+		t.Error("proxy mode doesn't probe the local proxy")
+	}
+	tun := profile.Settings{Mode: profile.ModeTUN, ListenPort: 1080}
+	old := probeThroughSystem
+	defer func() { probeThroughSystem = old }()
+	probeThroughSystem = true
+	if healthClient(&tun).Transport.(*http.Transport).Proxy != nil {
+		t.Error("TUN mode on a desktop probes the local proxy, not the TUN")
+	}
+	probeThroughSystem = false // the phone app, left out of its own VPN
+	if healthClient(&tun).Transport.(*http.Transport).Proxy == nil {
+		t.Error("the phone app's TUN mode must probe the proxy")
+	}
+}

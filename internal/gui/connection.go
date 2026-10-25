@@ -202,7 +202,7 @@ func (u *ui) connect() {
 		return
 	}
 	if err := u.store.Settings.Validate(); err != nil {
-		dialog.ShowError(err, u.win)
+		u.showError(err)
 		return
 	}
 	pc, s, id := *p, u.store.Settings, p.ID
@@ -275,7 +275,7 @@ func (u *ui) connect() {
 			}
 			if !s.AutoReconnect || attempt >= maxReconnectAttempts || !everStarted.Load() {
 				if lastErr != nil {
-					fyne.Do(func() { dialog.ShowError(lastErr, u.win) })
+					fyne.Do(func() { u.showError(lastErr) })
 				}
 				return
 			}

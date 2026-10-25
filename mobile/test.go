@@ -6,6 +6,7 @@ import (
 	"errors"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/khaliilii/MKConnect/internal/engine"
 	"github.com/khaliilii/MKConnect/internal/profile"
@@ -101,7 +102,9 @@ func StartTest(ids string, speed bool) error {
 
 	go func() {
 		defer cancel()
-		results := engine.TestMany(ctx, profiles, idx, settings, engine.TestOptions{Speed: speed}, 4,
+		// Speed samples are capped at 4 s an account: enough to rank servers
+		// without spending much of the user's data.
+		results := engine.TestMany(ctx, profiles, idx, settings, engine.TestOptions{Speed: speed, SpeedTime: 4 * time.Second}, 4,
 			func(i int, r *profile.TestResult) {
 				testMu.Lock()
 				if r.Speed == 0 {

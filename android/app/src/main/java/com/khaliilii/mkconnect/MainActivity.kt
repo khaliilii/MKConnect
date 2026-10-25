@@ -151,6 +151,7 @@ fun App(onConnect: (Boolean) -> Unit, onDisconnect: () -> Unit, clipboardText: (
     var newGroup by remember { mutableStateOf(false) }
     var renaming by remember { mutableStateOf<Group?>(null) }
     var moving by remember { mutableStateOf<Account?>(null) }
+    var rankStage by remember { mutableStateOf("") } // "" unless Update & test is updating
     val options = remember { Options.load() }
     val clipboard = LocalClipboardManager.current
     val scope = rememberCoroutineScope()
@@ -286,6 +287,29 @@ fun App(onConnect: (Boolean) -> Unit, onDisconnect: () -> Unit, clipboardText: (
                             .onFailure { message = it.message }
                         refresh()
                     },
+                    onUpdateAndRank = { filter ->
+                        if (rankStage.isEmpty() && !test.running) {
+                            rankStage = "Updating subscriptions…"
+                            scope.launch {
+                                withContext(Dispatchers.IO) { runCatching { Mkmobile.updateSubscriptions() } }
+                                refresh()
+                                // The accounts shown under the chosen group, as they are now.
+                                val ids = accounts.list.filter { a ->
+                                    when (filter) {
+                                        "" -> true
+                                        "-" -> a.group.isEmpty()
+                                        else -> a.group == filter
+                                    }
+                                }.map { it.id }
+                                rankStage = ""
+                                runCatching { Mkmobile.setSettings(loadSettings().copy(sortBy = "speed").toJson()) }
+                                runCatching { Mkmobile.startTest(ids.joinToString(","), true) }.onFailure { message = it.message }
+                                test = loadTestRun()
+                                refresh()
+                            }
+                        }
+                    },
+                    rankStage = rankStage,
                     onNewGroup = { newGroup = true },
                     onRenameGroup = { g -> renaming = g },
                     onDeleteGroup = { g ->

@@ -65,6 +65,8 @@ type ui struct {
 	usageText      *widget.Label
 
 	testBtn      *widget.Button
+	rankBtn      *widget.Button // Update & test
+	ranking      bool           // an Update & test is running
 	sortBtn      *widget.Button
 	testBar      *fyne.Container
 	testProgress *widget.ProgressBar
@@ -254,7 +256,7 @@ func (u *ui) logf(format string, args ...any) {
 // save writes the store and reports failures.
 func (u *ui) save() {
 	if err := u.store.Save(); err != nil {
-		dialog.ShowError(fmt.Errorf("save profiles: %w", err), u.win)
+		u.showError(fmt.Errorf("save profiles: %w", err))
 	}
 }
 
@@ -282,7 +284,7 @@ func (u *ui) checkLeftoverDNS() {
 			out, err := elevate.RunElevated("MKConnect needs administrator rights to restore your DNS settings.", RepairDNSFlag)
 			fyne.Do(func() {
 				if err != nil {
-					dialog.ShowError(fmt.Errorf("could not restore the DNS: %w", err), u.win)
+					u.showError(fmt.Errorf("could not restore the DNS: %w", err))
 					return
 				}
 				for _, line := range strings.Split(out, "\n") {
@@ -294,4 +296,12 @@ func (u *ui) checkLeftoverDNS() {
 			})
 		}()
 	}, u.win)
+}
+
+// showError tells the user about an error and writes it to the log as well:
+// an error that only appears in a dialog is gone once the dialog is, and the
+// log file is what a problem is looked into with afterwards.
+func (u *ui) showError(err error) {
+	log.Printf("❌ %v", err)
+	dialog.ShowError(err, u.win)
 }

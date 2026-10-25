@@ -75,6 +75,8 @@ fun AccountsScreen(
     onStartTest: (Boolean) -> Unit,
     onCancelTest: () -> Unit,
     onSortBy: (String) -> Unit,
+    onUpdateAndRank: (String) -> Unit,
+    rankStage: String,
     onNewGroup: () -> Unit,
     onRenameGroup: (Group) -> Unit,
     onDeleteGroup: (Group) -> Unit,
@@ -140,6 +142,16 @@ fun AccountsScreen(
             Field("", search, { search = it }, hint = "Search accounts")
         }
 
+        // One tap to pick a server: refresh the subscriptions, measure every
+        // account shown (latency and speed), sort by speed.
+        Button(
+            onClick = { onUpdateAndRank(groupFilter) },
+            enabled = rankStage.isEmpty() && !test.running,
+            modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 4.dp),
+        ) {
+            Icon(Icons.Filled.Speed, null); Spacer(Modifier.width(6.dp)); Text("Update & test")
+        }
+
         if (accounts.groups.isNotEmpty()) {
             LazyRow(
                 Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 6.dp),
@@ -178,6 +190,13 @@ fun AccountsScreen(
                     }
                     Text("${g.usedText} · ${g.count} accounts", style = MaterialTheme.typography.bodySmall)
                 }
+            }
+        }
+
+        if (rankStage.isNotEmpty()) {
+            Column(Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 4.dp)) {
+                Text(rankStage, style = MaterialTheme.typography.bodySmall)
+                LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
             }
         }
 

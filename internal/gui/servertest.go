@@ -3,6 +3,7 @@ package gui
 import (
 	"context"
 	"fmt"
+	"time"
 
 	"fyne.io/fyne/v2"
 	"fyne.io/fyne/v2/container"
@@ -83,7 +84,102 @@ func (u *ui) setSort(by string) {
 
 func (u *ui) testShown(speed bool) {
 	idx := append([]int(nil), u.visible...)
-	u.runTests(idx, speed)
+	u.runTests(idx, engine.TestOptions{Speed: speed}, nil)
+}
+
+// rankSpeedTime caps each account's download in "Update & test": long enough
+// to rank the servers, short enough not to spend much of the user's data.
+const rankSpeedTime = 4 * time.Second
+
+// updateAndRank is the one-click way to pick a server: it updates the
+// subscriptions (the one shown, or all of them), measures latency and speed
+// of every account shown, and sorts the list by speed.
+func (u *ui) updateAndRank() {
+	if u.testCancel != nil || u.ranking {
+		return
+	}
+	if u.blockedByTUN() {
+		return
+	}
+	var subs []string
+	if g, err := u.store.FindGroup(u.groupFilter); err == nil {
+		if g.IsSubscription() {
+			subs = append(subs, g.ID)
+		}
+	} else {
+		for _, g := range u.store.Groups {
+			if g.IsSubscription() {
+				subs = append(subs, g.ID)
+			}
+		}
+	}
+
+	u.ranking = true
+	u.rankBtn.Disable()
+	cancelled := false
+	u.testCancel = func() { cancelled = true } // the Cancel button during the update step
+	finished := func() {
+		u.ranking = false
+		u.rankBtn.Enable()
+	}
+	test := func(updated int) {
+		u.testCancel = nil
+		if cancelled {
+			u.testBar.Hide()
+			finished()
+			return
+		}
+		if len(subs) > 0 {
+			u.logf("🔄 %d of %d subscription(s) updated", updated, len(subs))
+		}
+		var idx []int
+		for _, i := range u.visible {
+			if !u.store.Profiles[i].IsInfo() { // a subscription's messages aren't servers
+				idx = append(idx, i)
+			}
+		}
+		if len(idx) == 0 {
+			u.testBar.Hide()
+			finished()
+			return
+		}
+		u.runTests(idx, engine.TestOptions{Speed: true, SpeedTime: rankSpeedTime}, func() {
+			u.setSort(profile.SortSpeed)
+			finished()
+		})
+	}
+
+	if len(subs) == 0 {
+		test(0)
+		return
+	}
+	u.testProgress.SetValue(0)
+	u.testLabel.SetText(fmt.Sprintf("Updating %d subscription(s)…", len(subs)))
+	u.testBar.Show()
+	u.profilesPanel.Refresh()
+	pending, updated := len(subs), 0
+	for _, id := range subs {
+		u.updateSubscription(id, false, func(ok bool) {
+			if ok {
+				updated++
+			}
+			if pending--; pending == 0 {
+				test(updated)
+			}
+		})
+	}
+}
+
+// blockedByTUN explains that a test can't run while TUN mode is connected:
+// its traffic would go through the current connection.
+func (u *ui) blockedByTUN() bool {
+	if u.state == stateIdle || u.store.Settings.Mode != profile.ModeTUN {
+		return false
+	}
+	dialog.ShowInformation("Disconnect first",
+		"VPN (TUN) mode is on, so the test traffic would go through the current connection.\n"+
+			"Disconnect, or switch to proxy mode, to test the servers themselves.", u.win)
+	return true
 }
 
 func (u *ui) testSelected() {
@@ -93,24 +189,22 @@ func (u *ui) testSelected() {
 	}
 	for i := range u.store.Profiles {
 		if u.store.Profiles[i].ID == p.ID {
-			u.runTests([]int{i}, true)
+			u.runTests([]int{i}, engine.TestOptions{Speed: true}, nil)
 			return
 		}
 	}
 }
 
 // runTests tests the given accounts in the background, shows each result as
-// it arrives and sorts the list when done.
-func (u *ui) runTests(idx []int, speed bool) {
+// it arrives and sorts the list when done; then, if given, runs after that.
+func (u *ui) runTests(idx []int, opts engine.TestOptions, then func()) {
 	if u.testCancel != nil || len(idx) == 0 {
 		return
 	}
-	if u.state != stateIdle && u.store.Settings.Mode == profile.ModeTUN {
-		dialog.ShowInformation("Disconnect first",
-			"VPN (TUN) mode is on, so the test traffic would go through the current connection.\n"+
-				"Disconnect, or switch to proxy mode, to test the servers themselves.", u.win)
+	if u.blockedByTUN() {
 		return
 	}
+	speed := opts.Speed
 	// Tests work on copies, keyed by id: the list may change meanwhile.
 	profiles := make([]profile.Profile, len(idx))
 	ids := make([]string, len(idx))
@@ -135,7 +229,7 @@ func (u *ui) runTests(idx []int, speed bool) {
 	done, working := 0, 0
 	tested := map[int]bool{} // accounts with a latency result
 	go func() {
-		testEngine(ctx, profiles, order, settings, engine.TestOptions{Speed: speed}, 8, func(n int, r *profile.TestResult) {
+		testEngine(ctx, profiles, order, settings, opts, 8, func(n int, r *profile.TestResult) {
 			fyne.Do(func() {
 				done++
 				if p := u.findProfile(ids[n]); p != nil {
@@ -173,6 +267,9 @@ func (u *ui) runTests(idx []int, speed bool) {
 			}
 			u.refreshProfiles()
 			u.logf("🧪 tested %d account(s): %d working", len(idx), working)
+			if then != nil {
+				then()
+			}
 		})
 	}()
 }

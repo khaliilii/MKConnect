@@ -2,6 +2,7 @@ package gui
 
 import (
 	"fmt"
+	"log"
 	"strconv"
 	"strings"
 
@@ -169,6 +170,7 @@ func (u *ui) openEditor(p profile.Profile, isNew bool) {
 			c(&edited)
 		}
 		if err := u.saveProfile(edited, isNew); err != nil {
+			log.Printf("❌ %v", err)
 			dialog.ShowError(err, w)
 			return
 		}

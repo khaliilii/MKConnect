@@ -48,6 +48,9 @@ A multi-account client for **SSH, VMess, VLESS, Trojan, Shadowsocks, Hysteria2 a
 - account list with **Add** (form per protocol), **Import** (links in bulk, optionally into a group, or a subscription URL), edit, copy share link and delete
 - group picker; subscriptions show a usage card (used / total, upload / download, expiry) and refresh automatically
 - share links copied to the clipboard are added automatically when you switch to the app (can be turned off)
+- **Update & test**: one click updates the subscriptions (the one shown, or all), measures latency and download
+  speed of every account shown (at most 4 s of download each, to spare the data quota) and sorts the list by
+  speed, fastest first; subscription messages such as "Used: 47 GB" are skipped. The phone app has the same button.
 - core, mode (Proxy / TUN), local port, LAN sharing and proxy password, all saved as you change them
 - one-click connect / disconnect; selecting another account while connected switches to it
 - live connection info: inbound, outbound, core, upload / download speed and totals

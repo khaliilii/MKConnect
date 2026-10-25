@@ -146,7 +146,9 @@ func (u *ui) newProfilesPanel() fyne.CanvasObject {
 	u.groupDeleteBtn = widget.NewButtonWithIcon("", theme.DeleteIcon(), u.confirmDeleteGroup)
 	testBtn, sortBtn, testBar := u.newTestControls()
 	groupBar := container.NewBorder(nil, nil, nil, container.NewHBox(u.groupUpdateBtn, u.groupDeleteBtn), u.groupSelect)
-	testRow := container.NewHBox(testBtn, sortBtn)
+	u.rankBtn = widget.NewButtonWithIcon(wide("Update & test"), theme.ViewRefreshIcon(), u.updateAndRank)
+	u.rankBtn.Importance = widget.HighImportance
+	testRow := container.NewHBox(u.rankBtn, testBtn, sortBtn)
 
 	u.usageCard = u.newUsageCard()
 
@@ -351,7 +353,7 @@ func (u *ui) confirmDelete() {
 			u.disconnect(nil)
 		}
 		if err := u.store.Remove(id); err != nil {
-			dialog.ShowError(err, u.win)
+			u.showError(err)
 			return
 		}
 		u.save()
@@ -381,9 +383,17 @@ func (u *ui) confirmDeleteGroup() {
 
 // updateSubscription downloads a subscription in the background and applies it.
 // interactive reports errors in a dialog; background refreshes only log them.
-func (u *ui) updateSubscription(groupID string, interactive bool) {
+// done, if given, is called on the main goroutine when it has finished, with
+// whether the subscription was updated.
+func (u *ui) updateSubscription(groupID string, interactive bool, done ...func(ok bool)) {
+	finish := func(ok bool) {
+		for _, f := range done {
+			f(ok)
+		}
+	}
 	g, err := u.store.FindGroup(groupID)
 	if err != nil || !g.IsSubscription() {
+		finish(false)
 		return
 	}
 	url, name, proxy := g.URL, g.Name, u.fetchProxy()
@@ -395,12 +405,14 @@ func (u *ui) updateSubscription(groupID string, interactive bool) {
 			if err != nil {
 				u.logf("❌ subscription %s: %v", name, err)
 				if interactive {
-					dialog.ShowError(fmt.Errorf("update %s: %w", name, err), u.win)
+					u.showError(fmt.Errorf("update %s: %w", name, err))
 				}
+				finish(false)
 				return
 			}
 			g, gerr := u.store.FindGroup(groupID)
 			if gerr != nil {
+				finish(false)
 				return // deleted while downloading
 			}
 			n, errs := u.store.ApplySubscription(g, data, time.Now())
@@ -409,13 +421,15 @@ func (u *ui) updateSubscription(groupID string, interactive bool) {
 			}
 			if n == 0 {
 				if interactive {
-					dialog.ShowError(fmt.Errorf("%s: no usable accounts", g.Name), u.win)
+					u.showError(fmt.Errorf("%s: no usable accounts", g.Name))
 				}
+				finish(false)
 				return
 			}
 			u.logf("✅ subscription %s updated: %d account(s)", g.Name, n)
 			u.save()
 			u.refreshProfiles()
+			finish(true)
 		})
 	}()
 }

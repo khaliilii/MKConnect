@@ -117,11 +117,24 @@ func NewID() string {
 }
 
 // IsInfo reports whether the "account" is a message a subscription sends in
-// an account's place (data used, days left, "update the app"): its server is
-// not a host name but text such as "Asgard By ODIN". Such entries are kept,
+// an account's place (data used, days left, "update the app", which accounts
+// suit which network): its server is not a host name but text such as
+// "Asgard By ODIN", or a bare number such as "1111". Such entries are kept,
 // since their names carry the message, but can't be connected or tested.
 func (p *Profile) IsInfo() bool {
-	return strings.ContainsAny(strings.TrimSpace(p.Server), " \t")
+	server := strings.TrimSpace(p.Server)
+	if strings.ContainsAny(server, " \t") {
+		return true
+	}
+	if server == "" {
+		return false
+	}
+	for _, c := range server { // all digits: neither an address nor a name
+		if c < '0' || c > '9' {
+			return false
+		}
+	}
+	return true
 }
 
 // ErrInfoEntry is returned for connecting to or testing an IsInfo entry.

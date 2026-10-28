@@ -398,7 +398,9 @@ func TestAutoReconnectAfterDrop(t *testing.T) {
 	}
 
 	u.connect()
-	waitFor(t, func() bool { return u.state == stateConnected })
+	// The first attempt is briefly connected too (it drops after starting):
+	// wait for the second one to be up.
+	waitFor(t, func() bool { return attempts.Load() == 2 && u.state == stateConnected && u.health.latency > 0 })
 	if got := attempts.Load(); got != 2 {
 		t.Fatalf("the connection was attempted %d times, want 2 (one drop, one success)", got)
 	}

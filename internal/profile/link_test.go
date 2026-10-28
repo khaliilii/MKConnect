@@ -228,7 +228,14 @@ func TestInfoEntries(t *testing.T) {
 	if !banner.IsInfo() {
 		t.Error("a subscription message entry was taken for a server")
 	}
-	for _, server := range []string{"de.example.com", "1.2.3.4", "2001:db8::1"} {
+	numbered := Profile{Name: "🆘C4=همراه اول و وایفای///C3=ایرانسل", Type: TypeVMess, Server: "1111", Port: 2222, UUID: "u"}
+	if !numbered.IsInfo() {
+		t.Error("a message entry with a bare number as its server was taken for a server")
+	}
+	for _, server := range []string{"de.example.com", "1.2.3.4", "2001:db8::1", "localhost", "10"} {
+		if server == "10" {
+			continue // a bare number is never a server
+		}
 		if (&Profile{Server: server}).IsInfo() {
 			t.Errorf("%s was taken for a message entry", server)
 		}

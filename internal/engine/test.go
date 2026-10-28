@@ -36,10 +36,44 @@ var (
 	FallbackURLs = []string{
 		"https://cp.cloudflare.com/generate_204",
 		"https://www.apple.com/library/test/success.html",
-		"https://www.msftconnecttest.com/connecttest.txt",
+		"https://detectportal.firefox.com/success.txt", // HTTPS (Microsoft's check is HTTP only)
 	}
 	SpeedURL = "https://speed.cloudflare.com/__down?bytes=25000000"
+	// SpeedFallbackURLs are downloaded when SpeedURL doesn't answer 200:
+	// Cloudflare's speed test answers "429 Too Many Requests" to a server's
+	// exit after a few tests, which made fast accounts measure 0 and sink to
+	// the bottom of a speed-sorted list.
+	SpeedFallbackURLs = []string{
+		"https://cachefly.cachefly.net/10mb.test",
+		"https://proof.ovh.net/files/10Mb.dat",
+	}
 )
+
+// openSpeedStream starts a download for a speed measurement: SpeedURL, or
+// the first fallback that answers 200.
+func openSpeedStream(ctx context.Context, c *http.Client) (*http.Response, error) {
+	var lastErr error
+	for _, u := range append([]string{SpeedURL}, SpeedFallbackURLs...) {
+		req, err := http.NewRequestWithContext(ctx, http.MethodGet, u, nil)
+		if err != nil {
+			return nil, err
+		}
+		resp, err := c.Do(req)
+		if err != nil {
+			lastErr = err
+			if ctx.Err() != nil {
+				return nil, err
+			}
+			continue
+		}
+		if resp.StatusCode == http.StatusOK {
+			return resp, nil
+		}
+		resp.Body.Close()
+		lastErr = fmt.Errorf("HTTP %s", resp.Status)
+	}
+	return nil, lastErr
+}
 
 // probeHedge is how long the main target gets before the fallbacks are
 // tried too (a blocked target often hangs instead of failing).
@@ -117,33 +151,11 @@ func Test(ctx context.Context, p profile.Profile, s profile.Settings, o TestOpti
 		r.Received, r.Error = 0, "not a server: a message from the subscription"
 		return r
 	}
-	if err := p.Validate(); err != nil {
-		return fail(err)
-	}
-	port, err := freeLocalPort()
+	port, _, stop, err := startPrivate(ctx, &p, &s)
 	if err != nil {
 		return fail(err)
 	}
-	s.Mode, s.ListenPort, s.AllowLAN, s.ShareInterfaces = profile.ModeProxy, port, false, nil
-	s.ProxyUser, s.ProxyPass = "", ""
-	s.Core = PreferredCore(&p, &s)
-
-	if p.Type == profile.TypeSSH && p.HostKey == "" {
-		// Trust the key for this test only; connecting pins it for real.
-		key, err := FetchHostKey(ctx, p)
-		if err != nil {
-			return fail(err)
-		}
-		p.HostKey = key
-	}
-	e, err := startForTest(&p, &s)
-	if err != nil {
-		return fail(err)
-	}
-	defer e.Close()
-	if err := waitPort(ctx, port, 5*time.Second); err != nil {
-		return fail(err)
-	}
+	defer stop()
 
 	client := proxyClient(port, o.Timeout)
 	defer client.CloseIdleConnections()
@@ -242,7 +254,8 @@ func startForTest(p *profile.Profile, s *profile.Settings) (Engine, error) {
 	}
 	// Not "none": Xray's log level is process-wide and would also silence a
 	// connection that is running at the same time.
-	cfg["log"] = obj{"loglevel": "error"}
+	// No access log either: it goes to stdout, into the CLI's tables and JSON.
+	cfg["log"] = obj{"loglevel": "error", "access": "none"}
 	if s.Core == profile.CoreExternal {
 		return startExternal(s.ExternalPath, cfg)
 	}
@@ -295,18 +308,11 @@ func download(ctx context.Context, port int, limit time.Duration) (int64, error)
 	defer cancel()
 	c := proxyClient(port, 0)
 	defer c.CloseIdleConnections()
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, SpeedURL, nil)
-	if err != nil {
-		return 0, err
-	}
-	resp, err := c.Do(req)
+	resp, err := openSpeedStream(ctx, c)
 	if err != nil {
 		return 0, err
 	}
 	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		return 0, fmt.Errorf("HTTP %s", resp.Status)
-	}
 	start := time.Now()
 	deadline := start.Add(limit)
 	buf := make([]byte, 64<<10)

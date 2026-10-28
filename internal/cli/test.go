@@ -60,6 +60,11 @@ shown by "profile list" and the app.`,
 					}
 				}
 			}
+			// The cores write their own log to stdout; keep it for the table.
+			out := os.Stdout
+			os.Stdout = os.Stderr
+			defer func() { os.Stdout = out }()
+
 			ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
 			defer stop()
 
@@ -80,8 +85,8 @@ shown by "profile list" and the app.`,
 				}
 			}
 			profile.SortProfiles(store.Profiles, idx, sortBy)
-			fmt.Println()
-			w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
+			fmt.Fprintln(out)
+			w := tabwriter.NewWriter(out, 0, 0, 2, ' ', 0)
 			fmt.Fprintln(w, "#\tACCOUNT\tLATENCY\tOK\tJITTER\tSPEED\tID")
 			for n, i := range idx {
 				p := &store.Profiles[i]

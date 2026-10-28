@@ -466,3 +466,57 @@ func TestFailedFirstConnectIsNotRetried(t *testing.T) {
 		t.Fatalf("a connection that never came up was tried %d times, want 1", got)
 	}
 }
+
+// TestLogButtons: the log's buttons say what they do and do it — Copy copies
+// what is shown and says so, Clear empties the log, Expand opens the log in a
+// window of its own whose Close closes it. (Icon-only buttons were taken for
+// window controls that didn't work.)
+func TestLogButtons(t *testing.T) {
+	u := newTestUI(t)
+	parts := u.logParts
+	for _, b := range []*widget.Button{parts.copyBtn, parts.clearBtn, parts.expandBtn} {
+		if b.Text == "" {
+			t.Errorf("a log button has no label (icon %v)", b.Icon.Name())
+		}
+	}
+	for _, line := range []string{"one", "two", "three"} {
+		u.logs.add(line)
+	}
+	u.refreshAllLogs()
+
+	test.Tap(parts.copyBtn)
+	if got := u.app.Clipboard().Content(); got != "one\ntwo\nthree" {
+		t.Fatalf("copied %q", got)
+	}
+	if !strings.HasPrefix(parts.copyBtn.Text, "Copied 3") {
+		t.Errorf("Copy gave no feedback: %q", parts.copyBtn.Text)
+	}
+
+	test.Tap(parts.expandBtn)
+	if u.logWindow == nil || u.logWindow.Title() != "MKConnect logs" {
+		t.Fatal("Expand did not open the log window")
+	}
+	screenshot(t, u.win, "log-panel")
+	screenshot(t, u.logWindow, "log-window")
+	if got := u.logWindowParts.list.Length(); got != 3 {
+		t.Fatalf("the log window shows %d lines, want 3", got)
+	}
+	u.logs.add("four")
+	u.refreshAllLogs()
+	if got := u.logWindowParts.list.Length(); got != 4 {
+		t.Fatalf("the log window did not follow new lines: %d", got)
+	}
+	test.Tap(parts.expandBtn) // again: the same window, not a second one
+	if len(u.logRefreshers) != 2 {
+		t.Fatalf("%d log views registered, want 2", len(u.logRefreshers))
+	}
+	test.Tap(u.logWindowParts.closeBtn)
+	if u.logWindow != nil || len(u.logRefreshers) != 1 {
+		t.Fatalf("Close left the window (%v) or its refresher (%d views)", u.logWindow, len(u.logRefreshers))
+	}
+
+	test.Tap(parts.clearBtn)
+	if got := u.logList.Length(); got != 0 {
+		t.Fatalf("Clear left %d lines", got)
+	}
+}

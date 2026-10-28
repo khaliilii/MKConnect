@@ -80,6 +80,11 @@ type ui struct {
 	logList        *widget.List
 	logSearch      *widget.Entry
 	logLevel       *widget.Select
+	logParts       *logParts   // the main window's log panel
+	logWindow      fyne.Window // the expanded log, while open
+	logWindowParts *logParts
+	logRefreshers  map[int]func() // every open log view
+	logRefresherID int
 
 	state  connState
 	health health

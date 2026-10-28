@@ -1,6 +1,7 @@
 package gui
 
 import (
+	"fmt"
 	"math"
 	"net/url"
 	"path/filepath"
@@ -11,6 +12,7 @@ import (
 	"fyne.io/fyne/v2"
 	"fyne.io/fyne/v2/container"
 	"fyne.io/fyne/v2/dialog"
+	"fyne.io/fyne/v2/layout"
 	"fyne.io/fyne/v2/theme"
 	"fyne.io/fyne/v2/widget"
 
@@ -39,10 +41,11 @@ func (b *logBuffer) add(line string) {
 	b.dirty = true
 }
 
-func (b *logBuffer) snapshot() []string {
+// current returns the lines without touching the dirty flag, which the
+// shared ticker has already taken.
+func (b *logBuffer) current() []string {
 	b.mu.Lock()
 	defer b.mu.Unlock()
-	b.dirty = false
 	return append([]string(nil), b.lines...)
 }
 
@@ -58,9 +61,43 @@ func (b *logBuffer) clear() {
 	b.lines, b.dirty = nil, true
 }
 
-// newLogView returns the log panel: wrapped lines, a search box, a log level
-// picker and an auto-scroll toggle, refreshed a few times a second.
+// newLogView returns the log panel of the main window. Its header names what
+// each button does: icon-only buttons read as window controls (a copy icon
+// looks like "maximize", a clear icon like "close"), and users took them for
+// broken ones.
 func (u *ui) newLogView() fyne.CanvasObject {
+	content, refresh, parts := u.logPanel(u.win, false)
+	u.refreshLogs, u.logList, u.logSearch, u.logLevel = refresh, parts.list, parts.search, parts.level
+	u.logParts = parts
+	u.addLogRefresher(refresh)
+	// One ticker for every log view: the buffer's dirty flag is taken once,
+	// then each view (this panel, the expanded window) redraws.
+	go func() {
+		for range time.Tick(logRefreshInterval) {
+			if u.logs.takeDirty() {
+				fyne.Do(u.refreshAllLogs)
+			}
+		}
+	}()
+	return content
+}
+
+// logParts are the widgets of a log panel that tests and callers reach.
+type logParts struct {
+	list      *widget.List
+	search    *widget.Entry
+	level     *widget.Select
+	copyBtn   *widget.Button
+	clearBtn  *widget.Button
+	expandBtn *widget.Button // main panel only
+	closeBtn  *widget.Button // expanded window only
+	followed  *widget.Check
+}
+
+// logPanel builds a log view for a window: wrapped lines, a filter, the log
+// level, a follow switch, copy and clear, and, in the main window, Expand
+// (the log in a window of its own) or, in that window, Close.
+func (u *ui) logPanel(parent fyne.Window, expanded bool) (fyne.CanvasObject, func(), *logParts) {
 	var (
 		lines  []string // what the list shows (filtered)
 		filter string
@@ -97,18 +134,19 @@ func (u *ui) newLogView() fyne.CanvasObject {
 		text := widget.NewMultiLineEntry() // an entry so the text can be selected and copied
 		text.SetText(line)
 		text.Wrapping = fyne.TextWrapBreak
-		d := dialog.NewCustom("Log line", "Close", container.NewVScroll(text), u.win)
-		u.fitDialog(d, 700, 300)
+		d := dialog.NewCustom("Log line", "Close", container.NewVScroll(text), parent)
+		size := parent.Canvas().Size()
+		d.Resize(fyne.NewSize(min(700, size.Width-16), min(300, size.Height-16)))
 		d.Show()
 	}
 
-	autoScroll := widget.NewCheck("", nil)
-	autoScroll.SetChecked(true)
+	follow := widget.NewCheck("Follow", nil)
+	follow.SetChecked(true)
 	search := widget.NewEntry()
 	search.SetPlaceHolder("Filter…")
 
 	refresh := func() {
-		all := u.logs.snapshot()
+		all := u.logs.current()
 		if filter == "" {
 			lines = all
 		} else {
@@ -121,25 +159,21 @@ func (u *ui) newLogView() fyne.CanvasObject {
 			}
 		}
 		list.Refresh()
-		if autoScroll.Checked {
+		if follow.Checked {
 			list.ScrollToBottom()
 		}
 	}
-	u.refreshLogs, u.logList, u.logSearch = refresh, list, search
 	search.OnChanged = func(s string) {
 		filter = strings.TrimSpace(s)
 		refresh()
 	}
-	go func() {
-		for range time.Tick(logRefreshInterval) {
-			if u.logs.takeDirty() {
-				fyne.Do(refresh)
-			}
+	follow.OnChanged = func(on bool) {
+		if on {
+			list.ScrollToBottom()
 		}
-	}()
+	}
 
 	level := widget.NewSelect(logLevels, nil)
-	u.logLevel = level
 	level.SetSelected(orDefault(u.store.Settings.LogLevel, "info"))
 	level.OnChanged = func(v string) {
 		if v == u.store.Settings.LogLevel {
@@ -152,19 +186,41 @@ func (u *ui) newLogView() fyne.CanvasObject {
 		}
 	}
 
-	clear := widget.NewButtonWithIcon("", theme.ContentClearIcon(), func() {
+	parts := &logParts{list: list, search: search, level: level, followed: follow}
+	var toolsRow *fyne.Container // laid out again when a button's text changes
+	parts.copyBtn = widget.NewButtonWithIcon("Copy", theme.ContentCopyIcon(), nil)
+	parts.copyBtn.OnTapped = func() {
+		text := strings.Join(lines, "\n") // what is shown: the filter applies
+		u.app.Clipboard().SetContent(text)
+		btn := parts.copyBtn
+		btn.SetText(fmt.Sprintf("Copied %d lines", len(lines)))
+		btn.SetIcon(theme.ConfirmIcon())
+		toolsRow.Refresh()
+		go func() {
+			time.Sleep(2 * time.Second)
+			fyne.Do(func() {
+				btn.SetText("Copy")
+				btn.SetIcon(theme.ContentCopyIcon())
+				toolsRow.Refresh()
+			})
+		}()
+	}
+	parts.clearBtn = widget.NewButtonWithIcon("Clear", theme.DeleteIcon(), func() {
 		u.logs.clear()
-		refresh()
+		u.refreshAllLogs()
 	})
-	clear.Importance = widget.LowImportance
-	copyAll := widget.NewButtonWithIcon("", theme.ContentCopyIcon(), func() {
-		u.app.Clipboard().SetContent(strings.Join(u.logs.snapshot(), "\n"))
-	})
-	copyAll.Importance = widget.LowImportance
 
 	title := widget.NewLabelWithStyle("Logs", fyne.TextAlignLeading, fyne.TextStyle{Bold: true})
-	tools := container.NewHBox(widget.NewLabel("Level"), level, widget.NewLabel("Follow"), autoScroll, copyAll, clear)
-	header := container.NewBorder(nil, nil, title, tools, search)
+	tools := []fyne.CanvasObject{widget.NewLabel("Level"), level, follow, layout.NewSpacer(), parts.copyBtn, parts.clearBtn}
+	if expanded {
+		parts.closeBtn = widget.NewButtonWithIcon("Close", theme.CancelIcon(), nil) // set by the window
+		tools = append(tools, parts.closeBtn)
+	} else {
+		parts.expandBtn = widget.NewButtonWithIcon("Expand", theme.ViewFullScreenIcon(), u.showLogWindow)
+		tools = append(tools, parts.expandBtn)
+	}
+	toolsRow = container.NewHBox(tools...)
+	header := container.NewVBox(container.NewBorder(nil, nil, title, nil, search), toolsRow)
 
 	// Every run is also kept in a file, to look at (or send) after the fact.
 	var footer fyne.CanvasObject
@@ -172,7 +228,7 @@ func (u *ui) newLogView() fyne.CanvasObject {
 		where := widget.NewLabel("Saved to " + path)
 		where.SizeName = theme.SizeNameCaptionText
 		where.Truncation = fyne.TextTruncateEllipsis
-		open := widget.NewButtonWithIcon("", theme.FolderOpenIcon(), func() {
+		open := widget.NewButtonWithIcon("Open folder", theme.FolderOpenIcon(), func() {
 			dir := filepath.ToSlash(filepath.Dir(path))
 			if !strings.HasPrefix(dir, "/") {
 				dir = "/" + dir // C:/Users/... -> file:///C:/Users/...
@@ -184,7 +240,51 @@ func (u *ui) newLogView() fyne.CanvasObject {
 		open.Importance = widget.LowImportance
 		footer = container.NewBorder(nil, nil, nil, open, where)
 	}
-	return container.NewBorder(header, footer, nil, nil, list)
+	refresh()
+	return container.NewBorder(header, footer, nil, nil, list), refresh, parts
+}
+
+// showLogWindow opens the log in a large window of its own (or brings it to
+// the front if it is open), with the same tools and a Close button.
+func (u *ui) showLogWindow() {
+	if u.logWindow != nil {
+		u.logWindow.Show()
+		u.logWindow.RequestFocus()
+		return
+	}
+	w := u.app.NewWindow("MKConnect logs")
+	content, refresh, parts := u.logPanel(w, true)
+	id := u.addLogRefresher(refresh)
+	closed := func() {
+		u.removeLogRefresher(id)
+		u.logWindow, u.logWindowParts = nil, nil
+	}
+	w.SetOnClosed(closed)
+	parts.closeBtn.OnTapped = w.Close
+	w.SetContent(content)
+	w.Resize(fyne.NewSize(1000, 700))
+	u.logWindow, u.logWindowParts = w, parts
+	w.Show()
+}
+
+// addLogRefresher registers a log view to redraw when lines arrive; it
+// returns an id for removeLogRefresher.
+func (u *ui) addLogRefresher(f func()) int {
+	if u.logRefreshers == nil {
+		u.logRefreshers = map[int]func(){}
+	}
+	u.logRefresherID++
+	u.logRefreshers[u.logRefresherID] = f
+	return u.logRefresherID
+}
+
+func (u *ui) removeLogRefresher(id int) { delete(u.logRefreshers, id) }
+
+// refreshAllLogs redraws every open log view.
+func (u *ui) refreshAllLogs() {
+	for _, f := range u.logRefreshers {
+		f()
+	}
 }
 
 // logRowHeight measures how tall a wrapped log line is at the list's current

@@ -34,6 +34,26 @@ var settingKeys = map[string]func(s *profile.Settings, v string) error{
 		s.ShareInterfaces = splitComma(v)
 		return nil
 	},
+	"direct-iran": func(s *profile.Settings, v string) error {
+		b, err := strconv.ParseBool(v)
+		s.DirectIran = b
+		return err
+	},
+	"failover": func(s *profile.Settings, v string) error {
+		b, err := strconv.ParseBool(v)
+		s.Failover = b
+		return err
+	},
+	"fake-dns": func(s *profile.Settings, v string) error {
+		b, err := strconv.ParseBool(v)
+		s.FakeDNS = b
+		return err
+	},
+	"mux": func(s *profile.Settings, v string) error {
+		b, err := strconv.ParseBool(v)
+		s.Mux = b
+		return err
+	},
 	"auto-reconnect": func(s *profile.Settings, v string) error {
 		b, err := strconv.ParseBool(v)
 		s.AutoReconnect = b
@@ -77,6 +97,10 @@ func newSettingsCmd() *cobra.Command {
 			fmt.Printf("share:         %s\n", strings.Join(s.ShareInterfaces, ","))
 			fmt.Printf("ipv6:          %t\n", s.IPv6)
 			fmt.Printf("auto-reconnect: %t\n", s.AutoReconnect)
+			fmt.Printf("failover:      %t\n", s.Failover)
+			fmt.Printf("mux:           %t\n", s.Mux)
+			fmt.Printf("direct-iran:   %t\n", s.DirectIran)
+			fmt.Printf("fake-dns:      %t\n", s.FakeDNS)
 			if s.TUNStack != "" || s.TUNMTU > 0 {
 				fmt.Printf("tun-stack:     %s\ntun-mtu:       %d\n", s.TUNStack, s.TUNMTU)
 			}
@@ -85,7 +109,7 @@ func newSettingsCmd() *cobra.Command {
 	}
 	set := &cobra.Command{
 		Use:   "set <key> <value>",
-		Short: "Change a setting (core, mode, external-path, external-kind, port, lan, proxy-user, proxy-pass, remote-dns, log-level, share, auto-reconnect, ipv6, tun-stack, tun-mtu)",
+		Short: "Change a setting (core, mode, external-path, external-kind, port, lan, proxy-user, proxy-pass, remote-dns, log-level, share, auto-reconnect, failover, mux, direct-iran, fake-dns, ipv6, tun-stack, tun-mtu)",
 		Example: `  mkconnect settings set core xray
   mkconnect settings set mode tun
   mkconnect settings set lan true

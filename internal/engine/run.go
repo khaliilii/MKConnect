@@ -38,7 +38,7 @@ func Run(ctx context.Context, p profile.Profile, s profile.Settings, hooks Hooks
 		return fmt.Errorf("settings: %w", err)
 	}
 	if core := PreferredCore(&p, &s); core != s.Core {
-		log.Printf("ℹ️  %s runs on the %s core: %s", p.Name, core, coreReason(&p))
+		log.Printf("ℹ️  %s runs on the %s core: %s", p.Name, core, coreReason(&p, &s))
 		s.Core = core
 	}
 	if (p.TLS.PinnedCertSHA256 != "" || p.TLS.VerifyByName != "") && s.Core != profile.CoreXray {
@@ -331,12 +331,14 @@ func withTUNHint(err error, tun bool) error {
 }
 
 // coreReason says why PreferredCore chose another core than configured.
-func coreReason(p *profile.Profile) string {
+func coreReason(p *profile.Profile, s *profile.Settings) string {
 	switch {
 	case p.Type == profile.TypeHysteria2 || p.Type == profile.TypeTUIC:
 		return p.Type + " needs sing-box"
 	case p.Transport.Network == "xhttp":
 		return "the xhttp transport needs Xray"
+	case s.Mux && MuxApplies(p):
+		return "Mux is on, and only Xray speaks the Mux.Cool servers understand"
 	case p.TLS.PinnedCertSHA256 != "" || p.TLS.VerifyByName != "":
 		return "the account trusts its server's certificate by hash or by other names, which only Xray checks"
 	case p.Transport.HeaderType == "http":

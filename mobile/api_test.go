@@ -139,7 +139,14 @@ func TestSettingsRoundTripAndOptions(t *testing.T) {
 	if s["auto_reconnect"] != true {
 		t.Errorf("auto-reconnect should default to on: %s", data)
 	}
+	if s["direct_iran"] != true {
+		t.Errorf("Iranian sites should go direct by default: %s", data)
+	}
 
+	if s["failover"] != true {
+		t.Errorf("failover should default to on: %s", data)
+	}
+	s["direct_iran"], s["failover"] = false, false
 	s["mode"], s["port"], s["log_level"], s["sort_by"] = "proxy", 1081.0, "debug", "latency"
 	s["auto_reconnect"], s["tun_stack"], s["tun_mtu"] = false, "gvisor", 1400.0
 	changed, _ := json.Marshal(s)
@@ -149,7 +156,7 @@ func TestSettingsRoundTripAndOptions(t *testing.T) {
 	again, _ := Settings()
 	json.Unmarshal([]byte(again), &s)
 	for k, want := range map[string]any{"mode": "proxy", "port": 1081.0, "log_level": "debug",
-		"sort_by": "latency", "auto_reconnect": false, "tun_stack": "gvisor", "tun_mtu": 1400.0} {
+		"sort_by": "latency", "auto_reconnect": false, "tun_stack": "gvisor", "tun_mtu": 1400.0, "direct_iran": false, "failover": false} {
 		if s[k] != want {
 			t.Errorf("%s = %v, want %v", k, s[k], want)
 		}

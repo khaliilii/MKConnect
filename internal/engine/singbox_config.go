@@ -17,7 +17,22 @@ const (
 	tagDirect = "direct"
 	tagLocal  = "local"
 	tagRemote = "remote"
+	tagFake   = "fakeip"
 )
+
+// iranianServices are Iranian sites outside .ir that DirectIran sends
+// straight out, by their own domain and its subdomains.
+var iranianServices = []string{
+	"aparat.com", "digikala.com", "digistyle.com", "filimo.com", "varzesh3.com",
+	"telewebion.com", "eitaa.com", "bale.ai", "torob.com", "sheypoor.com", "tgju.org",
+	"ninisite.com", "tasnimnews.com", "tebyan.net", "namasha.com", "cinematicket.org",
+}
+
+// iranDomains is DirectIran's list as sing-box domain suffixes: every .ir
+// name, and the services above.
+func iranDomains() []string {
+	return append([]string{".ir"}, iranianServices...)
+}
 
 // blockPageCIDRs are the addresses a national filter answers blocked names
 // with (Iran's "peyvandha" page).
@@ -100,6 +115,10 @@ func singBoxBase(s *profile.Settings, proxyOut obj, tun *tunOptions) obj {
 
 	dnsServers := []obj{{"type": "local", "tag": tagLocal}}
 	rules := []obj{{"ip_is_private": true, "outbound": tagDirect}}
+	if s.DirectIran {
+		// In TUN mode the sniff rule before it supplies the name.
+		rules = append(rules, obj{"domain_suffix": iranDomains(), "outbound": tagDirect})
+	}
 	dns := obj{"servers": dnsServers, "final": tagLocal}
 
 	if tun != nil {
@@ -148,6 +167,22 @@ func singBoxBase(s *profile.Settings, proxyOut obj, tun *tunOptions) obj {
 			// Without IPv6 on the TUN, sites must be reached over IPv4: answer
 			// AAAA queries empty, so apps don't try addresses that would hang.
 			dns["strategy"] = "ipv4_only"
+		}
+		if s.FakeDNS {
+			fake := obj{"type": "fakeip", "tag": tagFake, "inet4_range": "198.18.0.0/15"}
+			if s.IPv6 {
+				fake["inet6_range"] = "fc00::/18"
+			}
+			dns["servers"] = append(dns["servers"].([]obj), fake)
+			dns["rules"] = []obj{
+				// A short TTL: a placeholder cached by an app outlives the
+				// connection and leads nowhere once it stops.
+				{"query_type": []string{"A", "AAAA"}, "server": tagFake, "rewrite_ttl": 10},
+				// HTTPS records carry real addresses that would bypass the
+				// placeholders (and need a round trip): answer them empty,
+				// browsers then use the A record.
+				{"query_type": []string{"HTTPS", "SVCB"}, "action": "predefined", "rcode": "NOERROR"},
+			}
 		}
 		rules = append([]obj{
 			{"action": "sniff"},

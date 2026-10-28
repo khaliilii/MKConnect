@@ -16,6 +16,7 @@ import (
 	sbservice "github.com/sagernet/sing-box/adapter/service"
 	"github.com/sagernet/sing-box/dns"
 	"github.com/sagernet/sing-box/dns/transport"
+	"github.com/sagernet/sing-box/dns/transport/fakeip"
 	"github.com/sagernet/sing-box/dns/transport/local"
 	"github.com/sagernet/sing-box/experimental/deprecated"
 	"github.com/sagernet/sing-box/log"
@@ -39,6 +40,9 @@ import (
 
 // registerQUICOutbounds adds Hysteria2 and TUIC when built with the with_quic tag.
 var registerQUICOutbounds func(*outbound.Registry)
+
+// registerTestInbounds lets tests add inbounds that stand in for the TUN.
+var registerTestInbounds func(*inbound.Registry)
 
 func init() {
 	startSingBox = newSingBox
@@ -120,6 +124,9 @@ func singBoxContext(ctx context.Context) context.Context {
 	inbounds := inbound.NewRegistry()
 	sbtun.RegisterInbound(inbounds)
 	mixed.RegisterInbound(inbounds)
+	if registerTestInbounds != nil {
+		registerTestInbounds(inbounds)
+	}
 
 	outbounds := outbound.NewRegistry()
 	direct.RegisterOutbound(outbounds)
@@ -138,6 +145,7 @@ func singBoxContext(ctx context.Context) context.Context {
 	transport.RegisterTCP(dnsTransports)
 	transport.RegisterUDP(dnsTransports)
 	local.RegisterTransport(dnsTransports)
+	fakeip.RegisterTransport(dnsTransports)
 
 	return box.Context(ctx, inbounds, outbounds, endpoint.NewRegistry(), dnsTransports,
 		sbservice.NewRegistry(), certificate.NewRegistry())

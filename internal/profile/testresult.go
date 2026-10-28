@@ -2,6 +2,7 @@ package profile
 
 import (
 	"fmt"
+	"regexp"
 	"sort"
 	"time"
 )
@@ -78,4 +79,29 @@ func SortProfiles(profiles []Profile, idx []int, by string) {
 		}
 		return score(ra) < score(rb)
 	})
+}
+
+// costlyName matches names that announce a usage multiplier ("ضریب مصرف 2.5",
+// "x2", "2.5x"): such an account bills more traffic than it carries.
+var costlyName = regexp.MustCompile(`(?i)ضریب|\bx\s*\d+(\.\d+)?\b|\b\d+(\.\d+)?\s*x\b`)
+
+// Backups are the accounts to fall back on when current stops working: the
+// others of its group that worked when last tested, fastest first. Message
+// entries and accounts that announce a usage multiplier are left out, so a
+// failover never quietly spends the quota faster.
+func (s *Store) Backups(current *Profile) []Profile {
+	var idx []int
+	for i := range s.Profiles {
+		p := &s.Profiles[i]
+		if p.ID == current.ID || p.Group != current.Group || p.IsInfo() || !p.Test.OK() || costlyName.MatchString(p.Name) {
+			continue
+		}
+		idx = append(idx, i)
+	}
+	SortProfiles(s.Profiles, idx, SortSpeed)
+	out := make([]Profile, 0, len(idx))
+	for _, i := range idx {
+		out = append(out, s.Profiles[i])
+	}
+	return out
 }

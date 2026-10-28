@@ -13,6 +13,10 @@ func xrayConfig(p *profile.Profile, s *profile.Settings) (obj, error) {
 		return nil, err
 	}
 	out["tag"] = tagProxy
+	if s.Mux && MuxApplies(p) {
+		// Up to 8 connections share one to the server; UDP goes as XUDP.
+		out["mux"] = obj{"enabled": true, "concurrency": 8, "xudpConcurrency": 8}
+	}
 
 	socks := obj{"udp": true}
 	if s.ProxyUser != "" {
@@ -36,9 +40,7 @@ func xrayConfig(p *profile.Profile, s *profile.Settings) (obj, error) {
 			out,
 			{"tag": tagDirect, "protocol": "freedom"},
 		},
-		"routing": obj{
-			"rules": []obj{{"type": "field", "ip": privateCIDRs, "outboundTag": tagDirect}},
-		},
+		"routing": obj{"rules": xrayRules(s)},
 		// In-process traffic counters for the proxy outbound (read by xrayEngine.Traffic).
 		"stats":  obj{},
 		"policy": obj{"system": obj{"statsOutboundUplink": true, "statsOutboundDownlink": true}},
@@ -153,4 +155,32 @@ func xrayStream(p *profile.Profile) (obj, error) {
 		}
 	}
 	return stream, nil
+}
+
+// MuxApplies reports whether Mux can carry an account: VMess, VLESS without a
+// flow (XTLS Vision does its own thing with the TLS inside and refuses Mux),
+// Trojan and Shadowsocks. Not SSH, Hysteria2 or TUIC, which multiplex
+// themselves or aren't run by Xray.
+func MuxApplies(p *profile.Profile) bool {
+	switch p.Type {
+	case profile.TypeVMess, profile.TypeTrojan, profile.TypeShadowsocks:
+		return true
+	case profile.TypeVLESS:
+		return p.Flow == ""
+	}
+	return false
+}
+
+// xrayRules are the Xray routing rules: private addresses, and with
+// DirectIran the Iranian sites, go out directly.
+func xrayRules(s *profile.Settings) []obj {
+	rules := []obj{{"type": "field", "ip": privateCIDRs, "outboundTag": tagDirect}}
+	if s.DirectIran {
+		domains := []string{"domain:ir"}
+		for _, d := range iranianServices {
+			domains = append(domains, "domain:"+d)
+		}
+		rules = append(rules, obj{"type": "field", "domain": domains, "outboundTag": tagDirect})
+	}
+	return rules
 }

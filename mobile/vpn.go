@@ -68,6 +68,10 @@ var (
 	runConfig   []byte
 	runProfile  profile.Profile
 	runSettings profile.Settings
+	runVPN      bool
+	runLogFile  string
+	// runBackups are the accounts failover may move to, best first.
+	runBackups []profile.Profile
 	// monitorStop ends the health monitor of the current connection; a
 	// monitor whose channel is no longer the current one exits.
 	monitorStop chan struct{}
@@ -128,6 +132,10 @@ func Start(app Platform) error {
 		return err
 	}
 	prof, settings := *p, s.Settings
+	var backups []profile.Profile
+	if settings.AutoReconnect && settings.Failover {
+		backups = s.Backups(p)
+	}
 	mu.Unlock()
 	if prof.IsInfo() {
 		return setError(fmt.Errorf("%q: %w", prof.Name, profile.ErrInfoEntry))
@@ -159,6 +167,7 @@ func Start(app Platform) error {
 	session = engine.NewSessionFor(prof, settings, e)
 	runState = "connected"
 	runConfig, runProfile, runSettings = cfg, prof, settings
+	runVPN, runLogFile, runBackups = vpn, logFile, backups
 	healthErr, healthMS = "", 0
 	startHealthMonitor(settings)
 	runProxy = ""
@@ -239,7 +248,9 @@ func startHealthMonitor(s profile.Settings) {
 	stop := make(chan struct{})
 	monitorStop = stop
 	go func() {
-		fails, wait, first := 0, healthFirstCheck, true
+		// retries counts reconnects since traffic last got through: the
+		// second one moves to a backup account (failover).
+		fails, retries, wait, first := 0, 0, healthFirstCheck, true
 		for {
 			select {
 			case <-stop:
@@ -261,7 +272,7 @@ func startHealthMonitor(s profile.Settings) {
 				fails++
 				healthErr, healthMS = err.Error(), 0
 			} else {
-				fails = 0
+				fails, retries = 0, 0
 				healthErr, healthMS = "", latency.Milliseconds()
 			}
 			auto := s.AutoReconnect
@@ -270,23 +281,42 @@ func startHealthMonitor(s profile.Settings) {
 			if err == nil || fails < healthFailsToRetry || !auto {
 				continue
 			}
-			fails = 0
-			if rerr := reconnect(stop); rerr != nil {
+			fails, retries = 0, retries+1
+			if rerr := reconnect(stop, retries >= 2); rerr != nil {
 				return // the connection ended for good
 			}
 		}
 	}()
 }
 
-// reconnect starts the same connection again, in place, after it stopped
-// carrying traffic.
-func reconnect(stop chan struct{}) error {
+// reconnect starts the connection again, in place, after it stopped carrying
+// traffic: the same account, or with failover the best backup account.
+func reconnect(stop chan struct{}, failover bool) error {
 	runMu.Lock()
 	defer runMu.Unlock()
 	if monitorStop != stop || running == nil {
 		return errors.New("connection is gone")
 	}
 	runState = "reconnecting"
+	for failover && len(runBackups) > 0 {
+		next := runBackups[0]
+		runBackups = runBackups[1:]
+		cfg, err := engine.MobileConfig(next, runSettings, runVPN, runLogFile)
+		if err != nil {
+			continue
+		}
+		log.Printf("🔀 %s keeps failing; switching to %s", runProfile.Name, next.Name)
+		runConfig, runProfile, runName = cfg, next, next.Name
+		mu.Lock()
+		if s, err := loaded(); err == nil {
+			if _, err := s.Find(next.ID); err == nil {
+				s.Active = next.ID
+				s.Save()
+			}
+		}
+		mu.Unlock()
+		break
+	}
 	running.Close()
 	running, session = nil, nil
 	e, err := engine.StartSingBoxPlatform(runConfig, newPlatform(activeApp))

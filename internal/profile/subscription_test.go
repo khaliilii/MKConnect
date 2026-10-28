@@ -8,6 +8,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -231,5 +232,28 @@ func TestSortProfiles(t *testing.T) {
 	}
 	if got := order(""); got != "untested,failed,slow,fast-lossy,fast" {
 		t.Fatalf("unsorted: %s", got)
+	}
+}
+
+func TestBackups(t *testing.T) {
+	ok := func(speed int64) *TestResult { return &TestResult{Sent: 3, Received: 3, Latency: 100, Speed: speed} }
+	s := &Store{Profiles: []Profile{
+		{ID: "cur", Name: "C1", Group: "g"},
+		{ID: "slow", Name: "C2", Group: "g", Test: ok(1 << 20)},
+		{ID: "fast", Name: "C3", Group: "g", Test: ok(3 << 20)},
+		{ID: "dead", Name: "C4", Group: "g", Test: &TestResult{Sent: 3, Error: "timeout"}},
+		{ID: "untested", Name: "C5", Group: "g"},
+		{ID: "costly", Name: "Emergency- ضریب مصرف 2.5", Group: "g", Test: ok(9 << 20)},
+		{ID: "costly2", Name: "DE 2.5x", Group: "g", Test: ok(9 << 20)},
+		{ID: "info", Name: "Used: 47 GB", Server: "1111", Group: "g", Test: ok(9 << 20)},
+		{ID: "other", Name: "elsewhere", Group: "h", Test: ok(9 << 20)},
+		{ID: "linux", Name: "Linux 3", Group: "g", Test: ok(2 << 20)},
+	}}
+	var got []string
+	for _, p := range s.Backups(&s.Profiles[0]) {
+		got = append(got, p.ID)
+	}
+	if want := []string{"fast", "linux", "slow"}; !slices.Equal(got, want) {
+		t.Fatalf("backups %v, want %v", got, want)
 	}
 }

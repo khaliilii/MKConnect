@@ -324,6 +324,10 @@ type mobileSettings struct {
 	// ClipboardImport makes the app add share links it finds on the clipboard
 	// when it comes to the foreground.
 	ClipboardImport bool `json:"clipboard_import"`
+	// DirectIran sends Iranian sites out directly instead of through the server.
+	DirectIran bool `json:"direct_iran"`
+	FakeDNS    bool `json:"fake_dns"`
+	Failover   bool `json:"failover"`
 }
 
 // Settings returns the phone settings as JSON.
@@ -342,7 +346,8 @@ func Settings() (string, error) {
 	data, _ := json.Marshal(mobileSettings{Mode: mode, Port: st.ListenPort, AllowLAN: st.AllowLAN,
 		ProxyUser: st.ProxyUser, ProxyPass: st.ProxyPass, RemoteDNS: st.RemoteDNS, IPv6: st.IPv6,
 		LogLevel: st.LogLevel, AutoReconnect: st.AutoReconnect, SortBy: st.SortBy,
-		TUNStack: st.TUNStack, TUNMTU: st.TUNMTU, ClipboardImport: st.ClipboardImport})
+		TUNStack: st.TUNStack, TUNMTU: st.TUNMTU, ClipboardImport: st.ClipboardImport,
+		DirectIran: st.DirectIran, FakeDNS: st.FakeDNS, Failover: st.Failover})
 	return string(data), nil
 }
 
@@ -360,8 +365,8 @@ func SetSettings(data string) error {
 	}
 	st := s.Settings
 	st.ListenPort, st.AllowLAN, st.ProxyUser, st.ProxyPass, st.IPv6 = in.Port, in.AllowLAN, in.ProxyUser, in.ProxyPass, in.IPv6
-	st.AutoReconnect, st.SortBy, st.ClipboardImport = in.AutoReconnect, in.SortBy, in.ClipboardImport
-	st.TUNStack, st.TUNMTU = in.TUNStack, in.TUNMTU
+	st.AutoReconnect, st.SortBy, st.ClipboardImport, st.Failover = in.AutoReconnect, in.SortBy, in.ClipboardImport, in.Failover
+	st.TUNStack, st.TUNMTU, st.DirectIran, st.FakeDNS = in.TUNStack, in.TUNMTU, in.DirectIran, in.FakeDNS
 	if in.RemoteDNS != "" {
 		st.RemoteDNS = in.RemoteDNS
 	}

@@ -77,6 +77,24 @@ fun SettingsScreen(options: Options, status: Status, onMessage: (String) -> Unit
             s.autoReconnect,
             hint = "The connection is checked every 45 seconds; after two failed checks it is started again.",
         ) { save(s.copy(autoReconnect = it)) }
+        if (s.autoReconnect) {
+            SwitchRow(
+                "If the account keeps failing, switch to the fastest working one of its subscription",
+                s.failover,
+                hint = "Uses the last server test; accounts that bill extra usage (×2, ضریب مصرف) are never picked.",
+            ) { save(s.copy(failover = it)) }
+        }
+        SwitchRow(
+            "Open Iranian sites (.ir, Aparat, Digikala…) directly, not through the server",
+            s.directIran,
+            hint = "Faster for those sites, and it saves the server's traffic.",
+        ) { save(s.copy(directIran = it)) }
+        if (s.vpnMode) {
+            SwitchRow(
+                "Fast DNS (FakeIP): new sites don't wait for a DNS lookup through the tunnel",
+                s.fakeDns,
+            ) { save(s.copy(fakeDns = it)) }
+        }
         SwitchRow(
             "Add share links found on the clipboard when the app opens",
             s.clipboardImport,

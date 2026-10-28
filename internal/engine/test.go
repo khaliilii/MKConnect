@@ -201,6 +201,8 @@ func Test(ctx context.Context, p profile.Profile, s profile.Settings, o TestOpti
 //     only emulates it with its HTTP transport, and some Xray servers answer
 //     that with "400 Bad Request" (a full test found one refusing 7 of 8
 //     requests that Xray carried), so Xray runs them when it is available.
+//   - With Mux on, the accounts it applies to (MuxApplies): only Xray speaks
+//     the Mux.Cool the servers understand.
 //   - Accounts that trust their server's certificate by hash ("pcs") or by
 //     other names ("vcn"): Xray checks those, sing-box can't, and without
 //     them the CDN's own certificate fails the check.
@@ -228,7 +230,10 @@ func PreferredCore(p *profile.Profile, s *profile.Settings) string {
 	httpFront := slices.Contains([]string{"ws", "httpupgrade", "xhttp"}, p.Transport.Network)
 	// sing-box can pin a public key but not a certificate hash.
 	pinned := p.TLS.PinnedCertSHA256 != "" || p.TLS.VerifyByName != ""
-	if core == profile.CoreSingBox && (httpFront || httpHeader || pinned || startSingBox == nil) && startXray != nil {
+	// sing-box's multiplexing doesn't speak Xray's Mux.Cool, which the
+	// servers do.
+	mux := s.Mux && MuxApplies(p)
+	if core == profile.CoreSingBox && (httpFront || httpHeader || pinned || mux || startSingBox == nil) && startXray != nil {
 		return profile.CoreXray
 	}
 	return core

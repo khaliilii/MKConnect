@@ -57,6 +57,29 @@ type Settings struct {
 	// older profiles.json keeps the default).
 	AutoReconnect bool `json:"auto_reconnect"`
 
+	// Failover moves an auto-reconnecting connection to another account of
+	// the same group (see Store.Backups) when its own keeps failing. On by
+	// default.
+	Failover bool `json:"failover"`
+
+	// Mux combines an account's connections into a few long-lived ones to
+	// the server (Xray's Mux.Cool), so a page's many requests don't each pay
+	// a new handshake through the tunnel. Used for the accounts it applies
+	// to (see engine.MuxApplies), which then run on Xray.
+	Mux bool `json:"mux"`
+
+	// DirectIran sends Iranian sites (.ir, and Iranian services under other
+	// names) straight out instead of through the tunnel: they load faster
+	// from inside the country, some refuse foreign addresses, and their
+	// traffic doesn't count against the subscription. On by default.
+	DirectIran bool `json:"direct_iran"`
+
+	// FakeDNS answers name lookups in TUN mode at once with a placeholder
+	// address (FakeIP, 198.18.0.0/15) that sing-box maps back to the name, so
+	// the server looks the name up and a new site doesn't first wait for a
+	// DNS round trip through the tunnel. Off by default.
+	FakeDNS bool `json:"fake_dns"`
+
 	// SortBy orders the account list: "" (as added), "latency" or "speed".
 	SortBy string `json:"sort_by,omitempty"`
 
@@ -83,6 +106,8 @@ func DefaultSettings() Settings {
 		LogLevel:        "info",
 		ClipboardImport: true,
 		AutoReconnect:   true,
+		DirectIran:      true,
+		Failover:        true,
 	}
 }
 

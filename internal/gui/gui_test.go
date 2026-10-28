@@ -11,8 +11,10 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"slices"
 	"strconv"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -413,6 +415,54 @@ func TestAutoReconnectAfterDrop(t *testing.T) {
 	if got := attempts.Load(); got != 2 {
 		t.Fatalf("a user disconnect was retried: %d attempts", got)
 	}
+}
+
+// TestFailoverToBackup: an account that keeps failing is replaced by the
+// fastest working account of its group, skipping one that bills extra.
+func TestFailoverToBackup(t *testing.T) {
+	if raceEnabled {
+		t.Skip("background fyne.Do callbacks aren't serialized by the Fyne test driver")
+	}
+	u := newTestUI(t)
+	u.store.Settings.AutoReconnect, u.store.Settings.Failover = true, true
+	ps := u.store.Profiles
+	ps[1].Name = "Germany x2" // the fastest, but at twice the usage
+	ps[1].Test = &profile.TestResult{Sent: 3, Received: 3, Latency: 90, Speed: 5 << 20}
+	ps[2].Test = &profile.TestResult{Sent: 3, Received: 3, Latency: 120, Speed: 1 << 20}
+	u.store.Active = ps[0].ID
+	failing, backup := ps[0].ID, ps[2].ID
+
+	oldRun, oldDelay := runConnection, reconnectDelay
+	defer func() { runConnection, reconnectDelay = oldRun, oldDelay }()
+	reconnectDelay = func(int) time.Duration { return 10 * time.Millisecond }
+	var mu sync.Mutex
+	var tried []string
+	runConnection = func(ctx context.Context, p profile.Profile, s profile.Settings, hooks engine.Hooks) error {
+		mu.Lock()
+		tried = append(tried, p.ID)
+		mu.Unlock()
+		hooks.OnStarted(engine.NewSession("singbox", []string{"SOCKS5 127.0.0.1:1080"}, p.Address(), nil))
+		if p.ID == failing {
+			return errors.New("core stopped: boom")
+		}
+		hooks.OnHealth(42*time.Millisecond, nil)
+		<-ctx.Done()
+		return nil
+	}
+
+	u.connect()
+	waitFor(t, func() bool { return u.store.Active == backup && u.state == stateConnected && u.health.latency > 0 })
+	mu.Lock()
+	got := append([]string(nil), tried...)
+	mu.Unlock()
+	if want := []string{failing, failing, backup}; !slices.Equal(got, want) {
+		t.Errorf("accounts tried %v, want %v (two tries, then the backup)", got, want)
+	}
+	if !strings.Contains(u.statusLabel.Text, ps[2].Name) {
+		t.Errorf("status doesn't name the backup: %q", u.statusLabel.Text)
+	}
+	u.disconnect(nil)
+	waitFor(t, func() bool { return u.state == stateIdle })
 }
 
 // TestNoInternetIsReported shows a core that runs but carries no traffic as

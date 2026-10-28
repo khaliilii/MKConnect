@@ -108,11 +108,21 @@ func (u *ui) newConnectionPanel() fyne.CanvasObject {
 	ipv6.SetChecked(s.IPv6)
 	autoReconnect := widget.NewCheck("Reconnect automatically when the connection drops or stops working", nil)
 	autoReconnect.SetChecked(s.AutoReconnect)
+	failover := widget.NewCheck("If the account keeps failing, switch to the fastest working one of its subscription", nil)
+	failover.SetChecked(s.Failover)
+	directIran := widget.NewCheck("Open Iranian sites (.ir, Aparat, Digikala…) directly, not through the server", nil)
+	directIran.SetChecked(s.DirectIran)
+	mux := widget.NewCheck("Mux: carry many connections over one to the server (faster pages on slow links; runs on Xray)", nil)
+	mux.SetChecked(s.Mux)
+	fakeDNS := widget.NewCheck("Fast DNS (FakeIP): new sites don't wait for a DNS lookup through the tunnel (TUN mode)", nil)
+	fakeDNS.SetChecked(s.FakeDNS)
 
 	updateVisibility := func() {
 		form.setVisible(extBox, s.Core == profile.CoreExternal)
 		form.setVisible(tunWarning, s.Mode == profile.ModeTUN && !isElevated())
 		form.setVisible(shareBox, s.Mode == profile.ModeTUN && !isMobile)
+		form.setVisible(fakeDNS, s.Mode == profile.ModeTUN)
+		form.setVisible(failover, s.AutoReconnect)
 		shareHint.SetText(shareHintText(s.ShareInterfaces))
 		form.setVisible(lanInfo, s.AllowLAN)
 		lanInfo.SetText(lanAddresses(s))
@@ -132,6 +142,10 @@ func (u *ui) newConnectionPanel() fyne.CanvasObject {
 		s.ClipboardImport = clipboard.Checked
 		s.IPv6 = ipv6.Checked
 		s.AutoReconnect = autoReconnect.Checked
+		s.Failover = failover.Checked
+		s.DirectIran = directIran.Checked
+		s.Mux = mux.Checked
+		s.FakeDNS = fakeDNS.Checked
 		updateVisibility()
 		u.save()
 	}
@@ -142,6 +156,10 @@ func (u *ui) newConnectionPanel() fyne.CanvasObject {
 	clipboard.OnChanged = func(bool) { changed() }
 	ipv6.OnChanged = func(bool) { changed() }
 	autoReconnect.OnChanged = func(bool) { changed() }
+	failover.OnChanged = func(bool) { changed() }
+	directIran.OnChanged = func(bool) { changed() }
+	mux.OnChanged = func(bool) { changed() }
+	fakeDNS.OnChanged = func(bool) { changed() }
 	share.OnChanged = func(labels []string) {
 		if runtime.GOOS == "windows" && len(labels) > 1 {
 			// Internet Connection Sharing supports one adapter: keep the newest choice.
@@ -173,6 +191,10 @@ func (u *ui) newConnectionPanel() fyne.CanvasObject {
 		{Text: "", Widget: clipboard},
 		{Text: "", Widget: ipv6},
 		{Text: "", Widget: autoReconnect},
+		{Text: "", Widget: failover},
+		{Text: "", Widget: directIran},
+		{Text: "", Widget: mux},
+		{Text: "", Widget: fakeDNS},
 	})
 	updateVisibility()
 	u.settingsBox = settings
@@ -206,6 +228,11 @@ func (u *ui) connect() {
 		return
 	}
 	pc, s, id := *p, u.store.Settings, p.ID
+	// Taken now, on the UI goroutine: the loop below runs without the store.
+	var backups []profile.Profile
+	if s.AutoReconnect && s.Failover {
+		backups = u.store.Backups(p)
+	}
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan struct{})
 	u.cancel, u.done = cancel, done
@@ -221,7 +248,9 @@ func (u *ui) connect() {
 		// first attempt never comes up (a message entry, a taken port, a
 		// denied permission prompt), trying again only repeats the error.
 		var everStarted atomic.Bool
+		cur, curID := pc, id // the account in use; failover changes it
 		for attempt := 1; ; attempt++ {
+			pc, id := cur, curID
 			// Each attempt gets its own context, so a connection that stops
 			// carrying traffic can be dropped without ending the whole run.
 			attemptCtx, attemptCancel := context.WithCancel(ctx)
@@ -283,13 +312,33 @@ func (u *ui) connect() {
 			if err != nil {
 				u.logf("⚠️  %s stopped: %v", pc.Name, err)
 			}
-			u.logf("🔄 reconnecting to %s in %s (attempt %d of %d)", pc.Name, wait, attempt+1, maxReconnectAttempts)
+			if attempt >= failoverAfter && len(backups) > 0 {
+				// This account failed again after a reconnect: carry on with
+				// the best of the others instead of retrying it ten times.
+				cur, curID, backups = backups[0], backups[0].ID, backups[1:]
+				u.logf("🔀 %s keeps failing; switching to %s", pc.Name, cur.Name)
+				attempt = 0 // the next account starts its own count
+				nextID := curID
+				fyne.Do(func() {
+					if u.done != done {
+						return
+					}
+					if _, err := u.store.Find(nextID); err == nil {
+						u.store.Active = nextID
+						u.save()
+						u.refreshProfiles()
+					}
+				})
+			} else {
+				u.logf("🔄 reconnecting to %s in %s (attempt %d of %d)", pc.Name, wait, attempt+1, maxReconnectAttempts)
+			}
+			name := cur.Name
 			fyne.Do(func() {
 				if u.done != done {
 					return
 				}
 				u.session, u.health = nil, health{}
-				u.setState(stateReconnecting, pc.Name)
+				u.setState(stateReconnecting, name)
 			})
 			select {
 			case <-ctx.Done():
@@ -298,7 +347,7 @@ func (u *ui) connect() {
 			}
 			fyne.Do(func() {
 				if u.done == done {
-					u.setState(stateConnecting, pc.Name)
+					u.setState(stateConnecting, name)
 				}
 			})
 		}
@@ -321,6 +370,9 @@ func (u *ui) connect() {
 const (
 	maxReconnectAttempts       = 10
 	healthFailsBeforeReconnect = 2
+	// failoverAfter is how many attempts an account gets before failover
+	// moves on: the first connection and one reconnect.
+	failoverAfter = 2
 )
 
 // reconnectDelay is how long to wait before attempt+1; a variable so tests

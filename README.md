@@ -60,6 +60,22 @@ A multi-account client for **SSH, VMess, VLESS, Trojan, Shadowsocks, Hysteria2 a
   internet through the tunnel, or "no internet" with the reason when the core runs but nothing gets through
 - **auto-reconnect** (on by default): a connection that drops, or that stops carrying traffic for two checks
   (45 s apart), is started again with a growing delay, up to ten attempts; a working connection resets the count
+- **failover** (on by default, with auto-reconnect): when an account fails again after a reconnect, the
+  connection moves to the fastest account of the same subscription that worked in the last server test (run
+  **Update & test** to refresh it). Message entries and accounts whose name announces extra usage (`×2`, `2.5x`,
+  `ضریب مصرف`) are never picked. Desktop and phone app
+- **Iranian sites direct** (on by default): `.ir` domains and well-known Iranian services (Aparat, Digikala,
+  Filimo, Varzesh3, …) go out directly instead of through the server — faster for them, and the server's traffic
+  is spared. Both cores, proxy and TUN mode; `mkconnect settings set direct-iran false` sends everything through
+- **Mux** (off by default): many connections to the server share one, so a page's dozens of requests don't each
+  pay the connection setup through the tunnel. It is Xray's Mux.Cool, so accounts run on Xray when it is on; it
+  doesn't apply to XTLS Vision (REALITY) accounts, which stay as they are. `mkconnect settings set mux true`
+  Measured (4 accounts, 2 rounds): a new connection answers in half the time and a page's burst of requests
+  finishes ~15% sooner, but downloads over several streams get slower, since they share one connection
+- **Fast DNS** (FakeIP, TUN mode, off by default): a lookup is answered at once with a placeholder address
+  (198.18.0.0/15) that is mapped back to the name, and the server looks the name up, so a new site doesn't first
+  wait for a DNS round trip through the tunnel. The answers live 10 s, so nothing stale outlasts the connection.
+  `mkconnect settings set fake-dns true`
 - **log files**: every run's complete log (the app's messages, the cores' output and a crash report if it
   crashes) is saved to a `logs` folder next to the program, or, where that can't be written (Program Files,
   a macOS app bundle, /usr/bin), to the user's config folder (`%AppData%\mkconnect\logs`,
@@ -118,6 +134,9 @@ mkconnect settings set mode tun                     # proxy | tun
 mkconnect settings set lan true
 mkconnect settings set proxy-user me
 mkconnect settings set proxy-pass secret
+mkconnect settings set direct-iran false            # Iranian sites through the server too
+mkconnect settings set mux true                     # many connections over one (Xray Mux.Cool)
+mkconnect settings set fake-dns true                # TUN: answer lookups at once (FakeIP)
 
 # external core
 mkconnect settings set external-path /usr/local/bin/sing-box
@@ -129,6 +148,11 @@ mkconnect
 mkconnect run germany --mode tun
 sudo mkconnect run germany --mode tun --lan
 mkconnect interfaces                                # interfaces that can share the tunnel
+
+# measure accounts the way browsing uses them: new-connection time, a page-like
+# burst of 12 connections, download speed with 1 and 4 streams, and a score
+mkconnect bench                                     # every account (or name them, or --group work)
+mkconnect bench germany --json
 sudo mkconnect run germany --mode tun --share eth1  # gateway for devices on eth1
 ```
 

@@ -91,6 +91,9 @@ func TestSingBoxTUNConfigParses(t *testing.T) {
 		t.Fatal(err)
 	}
 	cfgs = append(cfgs, full)
+	s.FakeDNS, s.IPv6 = true, true
+	fake, _ := singBoxConfig(&testProfiles[0], &s, &tunOptions{})
+	cfgs = append(cfgs, fake)
 	for _, cfg := range cfgs {
 		data, _ := marshal(cfg)
 		if err := parseSingBox(data); err != nil {
@@ -332,6 +335,100 @@ func TestPinnedCertificateConfig(t *testing.T) {
 			t.Fatalf("xray refused the pinned config: %v", err)
 		} else {
 			e.Close()
+		}
+	}
+}
+
+// TestDirectIranRoutes: with DirectIran, Iranian sites go out directly on both
+// cores (and both accept the rule); without it they go through the tunnel.
+func TestDirectIranRoutes(t *testing.T) {
+	s := testSettings(t)
+	s.DirectIran = true
+	hasIran := func(rules []obj) bool {
+		for _, r := range rules {
+			if d, ok := r["domain_suffix"].([]string); ok && slices.Contains(d, ".ir") && r["outbound"] == tagDirect {
+				return true
+			}
+			if d, ok := r["domain"].([]string); ok && slices.Contains(d, "domain:ir") && r["outboundTag"] == tagDirect {
+				return true
+			}
+		}
+		return false
+	}
+	for _, tun := range []*tunOptions{nil, {}} {
+		cfg, err := singBoxConfig(&testProfiles[0], &s, tun)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !hasIran(cfg["route"].(obj)["rules"].([]obj)) {
+			t.Errorf("sing-box (tun %v): Iranian sites not sent directly", tun != nil)
+		}
+		if startSingBox != nil {
+			data, _ := marshal(cfg)
+			if err := parseSingBox(data); err != nil {
+				t.Fatalf("sing-box refused the rule: %v", err)
+			}
+		}
+	}
+	x, err := xrayConfig(&testProfiles[0], &s)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !hasIran(x["routing"].(obj)["rules"].([]obj)) {
+		t.Error("xray: Iranian sites not sent directly")
+	}
+	if startXray != nil {
+		data, _ := marshal(x)
+		e, err := startXray(data)
+		if err != nil {
+			t.Fatalf("xray refused the rule: %v", err)
+		}
+		e.Close()
+	}
+
+	s.DirectIran = false
+	off, _ := singBoxConfig(&testProfiles[0], &s, nil)
+	xoff, _ := xrayConfig(&testProfiles[0], &s)
+	if hasIran(off["route"].(obj)["rules"].([]obj)) || hasIran(xoff["routing"].(obj)["rules"].([]obj)) {
+		t.Error("switched off, Iranian sites still bypass the tunnel")
+	}
+}
+
+// TestMuxConfig: Mux goes on the accounts it applies to, on Xray, and not on
+// XTLS Vision, which refuses it.
+func TestMuxConfig(t *testing.T) {
+	s := testSettings(t)
+	s.Mux = true
+	ws := profile.Profile{Name: "ws", Type: profile.TypeVLESS, Server: "h", Port: 443, UUID: testUUID,
+		Transport: profile.Transport{Network: "ws"}, TLS: profile.TLS{Mode: "tls", SNI: "h"}}
+	vision := profile.Profile{Name: "vision", Type: profile.TypeVLESS, Server: "h", Port: 443, UUID: testUUID,
+		Flow: "xtls-rprx-vision", TLS: profile.TLS{Mode: "reality", SNI: "h", RealityPublicKey: "jNXHt1yRo0vDuchQlIP6Z0ZvjT3KtzVI-T4E7RoLJS0"}}
+	cfg, err := xrayConfig(&ws, &s)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if mux, ok := cfg["outbounds"].([]obj)[0]["mux"].(obj); !ok || mux["enabled"] != true {
+		t.Fatalf("mux not on for a WebSocket account: %v", cfg["outbounds"])
+	}
+	if startXray != nil {
+		data, _ := marshal(cfg)
+		e, err := startXray(data)
+		if err != nil {
+			t.Fatalf("xray refused mux: %v", err)
+		}
+		e.Close()
+	}
+	vcfg, _ := xrayConfig(&vision, &s)
+	if _, ok := vcfg["outbounds"].([]obj)[0]["mux"]; ok {
+		t.Fatal("mux was put on an XTLS Vision account")
+	}
+	if startXray != nil && startSingBox != nil {
+		plain := profile.Profile{Type: profile.TypeTrojan, TLS: profile.TLS{Mode: "tls"}}
+		if got := PreferredCore(&plain, &s); got != profile.CoreXray {
+			t.Errorf("with mux on, a trojan account runs on %s, want xray", got)
+		}
+		if got := PreferredCore(&vision, &s); got != profile.CoreSingBox {
+			t.Errorf("a vision account moved to %s although mux doesn't apply", got)
 		}
 	}
 }

@@ -295,3 +295,43 @@ func TestTUNRefusesTheBlockPage(t *testing.T) {
 		}
 	}
 }
+
+// TestPinnedCertificateConfig: Xray gets the pin to check, sing-box (which
+// can't) runs unverified, and the account is sent to Xray when it exists.
+func TestPinnedCertificateConfig(t *testing.T) {
+	pin := "cd6e838b9bfe31cab8b3d5c858b0d6223fe84ece236c1fdb281be93c302e1e6e"
+	p := profile.Profile{Name: "c2", Type: profile.TypeVLESS, Server: "fast.example", Port: 443, UUID: testUUID,
+		Transport: profile.Transport{Network: "ws", Host: "x.global.ssl.fastly.net"},
+		TLS:       profile.TLS{Mode: "tls", SNI: "firefox.com", PinnedCertSHA256: pin}}
+	s := testSettings(t)
+	x, err := xrayOutbound(&p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	tls := x["streamSettings"].(obj)["tlsSettings"].(obj)
+	if tls["pinnedPeerCertSha256"] != pin || tls["serverName"] != "firefox.com" {
+		t.Fatalf("xray tls %v", tls)
+	}
+	if sb := singBoxTLS(&p); sb["insecure"] != true {
+		t.Fatalf("sing-box tls %v: want unverified, it can't check the pin", sb)
+	}
+	plain := p
+	plain.Transport = profile.Transport{}
+	if startXray != nil && startSingBox != nil {
+		if got := PreferredCore(&plain, &s); got != profile.CoreXray {
+			t.Fatalf("a pinned account runs on %s, want xray", got)
+		}
+	}
+	if startXray != nil {
+		cfg, err := xrayConfig(&p, &s)
+		if err != nil {
+			t.Fatal(err)
+		}
+		data, _ := marshal(cfg)
+		if e, err := startXray(data); err != nil {
+			t.Fatalf("xray refused the pinned config: %v", err)
+		} else {
+			e.Close()
+		}
+	}
+}

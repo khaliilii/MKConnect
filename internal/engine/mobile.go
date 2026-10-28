@@ -1,6 +1,10 @@
 package engine
 
-import "github.com/khaliilii/MKConnect/internal/profile"
+import (
+	"log"
+
+	"github.com/khaliilii/MKConnect/internal/profile"
+)
 
 // MobileConfig returns the sing-box config for the phone app: with tun the
 // platform (Android's VpnService) creates the TUN from the inbound's addresses
@@ -8,6 +12,10 @@ import "github.com/khaliilii/MKConnect/internal/profile"
 func MobileConfig(p profile.Profile, s profile.Settings, tun bool, logFile string) ([]byte, error) {
 	if err := p.Validate(); err != nil {
 		return nil, err
+	}
+	if p.TLS.PinnedCertSHA256 != "" || p.TLS.VerifyByName != "" {
+		log.Printf("⚠️  %s trusts its server's certificate by hash, which the phone app's core "+
+			"can't check: the certificate is not verified", p.Name)
 	}
 	var opts *tunOptions
 	if tun {

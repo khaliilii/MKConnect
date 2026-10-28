@@ -189,6 +189,9 @@ func Test(ctx context.Context, p profile.Profile, s profile.Settings, o TestOpti
 //     only emulates it with its HTTP transport, and some Xray servers answer
 //     that with "400 Bad Request" (a full test found one refusing 7 of 8
 //     requests that Xray carried), so Xray runs them when it is available.
+//   - Accounts that trust their server's certificate by hash ("pcs") or by
+//     other names ("vcn"): Xray checks those, sing-box can't, and without
+//     them the CDN's own certificate fails the check.
 //   - The same over WebSocket and HTTP upgrade, which reach the server
 //     through an HTTP front end (often a CDN): when one of the front end's
 //     backends fails, half the handshakes get "503". Xray dials each
@@ -211,7 +214,9 @@ func PreferredCore(p *profile.Profile, s *profile.Settings) string {
 	// Not gRPC: Xray's gRPC client doesn't work with sing-box's own gRPC
 	// servers, and gRPC showed no such failures.
 	httpFront := slices.Contains([]string{"ws", "httpupgrade", "xhttp"}, p.Transport.Network)
-	if core == profile.CoreSingBox && (httpFront || httpHeader || startSingBox == nil) && startXray != nil {
+	// sing-box can pin a public key but not a certificate hash.
+	pinned := p.TLS.PinnedCertSHA256 != "" || p.TLS.VerifyByName != ""
+	if core == profile.CoreSingBox && (httpFront || httpHeader || pinned || startSingBox == nil) && startXray != nil {
 		return profile.CoreXray
 	}
 	return core

@@ -234,3 +234,42 @@ func TestInfoEntries(t *testing.T) {
 		}
 	}
 }
+
+// TestPinnedCertificateLinks: providers front through a CDN and pin its
+// certificate ("pcs"), sometimes with names to check instead ("vcn"); both
+// must survive import and export, in URL and vmess JSON links.
+func TestPinnedCertificateLinks(t *testing.T) {
+	pin := "cd6e838b9bfe31cab8b3d5c858b0d6223fe84ece236c1fdb281be93c302e1e6e"
+	link := "vless://bf000d23-0752-40b4-affe-68f7707a9661@fast.example:443?type=ws&host=x.global.ssl.fastly.net" +
+		"&path=%2Fsoss&security=tls&sni=firefox.com&alpn=h2&fp=chrome&pcs=" + pin + "&vcn=default.ssl.fastly.net#C2"
+	p, err := ParseLink(link)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if p.TLS.PinnedCertSHA256 != pin || p.TLS.VerifyByName != "default.ssl.fastly.net" {
+		t.Fatalf("pin not read: %+v", p.TLS)
+	}
+	again, err := ParseLink(p.Link())
+	if err != nil {
+		t.Fatal(err)
+	}
+	assertProfile(t, again, p)
+
+	vm := `{"ps":"v","add":"x.com","port":443,"id":"bf000d23-0752-40b4-affe-68f7707a9661","net":"ws","tls":"tls","pcs":"` + pin + `"}`
+	v, err := ParseLink("vmess://" + base64.StdEncoding.EncodeToString([]byte(vm)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if v.TLS.PinnedCertSHA256 != pin {
+		t.Fatalf("vmess pin not read: %+v", v.TLS)
+	}
+	if back, _ := ParseLink(v.Link()); back.TLS.PinnedCertSHA256 != pin {
+		t.Fatal("vmess pin lost on export")
+	}
+
+	bad := p
+	bad.TLS.PinnedCertSHA256 = "not-a-hash"
+	if bad.Validate() == nil {
+		t.Fatal("a pin that is not a SHA-256 was accepted")
+	}
+}

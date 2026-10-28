@@ -120,6 +120,8 @@ type vmessLink struct {
 	SNI  string  `json:"sni"`
 	ALPN string  `json:"alpn"`
 	FP   string  `json:"fp"`
+	PCS  string  `json:"pcs,omitempty"`
+	VCN  string  `json:"vcn,omitempty"`
 }
 
 func parseVMess(link string) (Profile, error) {
@@ -148,7 +150,8 @@ func parseVMess(link string) (Profile, error) {
 		p.Transport.HeaderType = "http"
 	}
 	if v.TLS == "tls" || v.TLS == "reality" {
-		p.TLS = TLS{Mode: v.TLS, SNI: v.SNI, Fingerprint: v.FP, ALPN: splitList(v.ALPN)}
+		p.TLS = TLS{Mode: v.TLS, SNI: v.SNI, Fingerprint: v.FP, ALPN: splitList(v.ALPN),
+			PinnedCertSHA256: v.PCS, VerifyByName: v.VCN}
 	}
 	return p, nil
 }
@@ -193,6 +196,8 @@ func parseURLLink(link string) (Profile, error) {
 			Insecure:         q.Get("allowInsecure") == "1" || q.Get("insecure") == "1",
 			RealityPublicKey: q.Get("pbk"),
 			RealityShortID:   q.Get("sid"),
+			PinnedCertSHA256: q.Get("pcs"),
+			VerifyByName:     q.Get("vcn"),
 		}
 	}
 	return p, nil
@@ -324,6 +329,7 @@ func (p *Profile) Link() string {
 			PS: p.Name, Add: p.Server, Port: flexInt(p.Port), ID: p.UUID, Aid: flexInt(p.AlterID),
 			Scy: p.Security, Net: p.Transport.Network, Type: p.Transport.HeaderType, Host: p.Transport.Host, Path: p.Transport.Path,
 			TLS: p.TLS.Mode, SNI: p.TLS.SNI, FP: p.TLS.Fingerprint, ALPN: strings.Join(p.TLS.ALPN, ","),
+			PCS: p.TLS.PinnedCertSHA256, VCN: p.TLS.VerifyByName,
 		}
 		if v.Net == "grpc" {
 			v.Path = p.Transport.ServiceName
@@ -351,6 +357,8 @@ func (p *Profile) Link() string {
 		setIf(q, "alpn", strings.Join(p.TLS.ALPN, ","))
 		setIf(q, "pbk", p.TLS.RealityPublicKey)
 		setIf(q, "sid", p.TLS.RealityShortID)
+		setIf(q, "pcs", p.TLS.PinnedCertSHA256)
+		setIf(q, "vcn", p.TLS.VerifyByName)
 		if p.Type == TypeVLESS {
 			q.Set("encryption", "none")
 		}

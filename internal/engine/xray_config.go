@@ -133,6 +133,12 @@ func xrayStream(p *profile.Profile) (obj, error) {
 		if len(tls.ALPN) > 0 {
 			s["alpn"] = tls.ALPN
 		}
+		if tls.PinnedCertSHA256 != "" {
+			s["pinnedPeerCertSha256"] = tls.PinnedCertSHA256
+		}
+		if tls.VerifyByName != "" {
+			s["verifyPeerCertByName"] = tls.VerifyByName
+		}
 		if tls.Fingerprint != "" {
 			s["fingerprint"] = tls.Fingerprint
 		}

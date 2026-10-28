@@ -335,7 +335,13 @@ func singBoxTLS(p *profile.Profile) obj {
 	if len(t.ALPN) > 0 {
 		tls["alpn"] = t.ALPN
 	}
-	if t.Insecure {
+	if t.Insecure || t.PinnedCertSHA256 != "" || t.VerifyByName != "" {
+		// sing-box can pin a public key but not a certificate hash, and it
+		// can't verify against other names: the account's own check can't
+		// be made, and the name check fails by design (the CDN's
+		// certificate doesn't carry the SNI). Run unverified; PreferredCore
+		// keeps such accounts on Xray wherever Xray is available, and Run
+		// warns when it isn't.
 		tls["insecure"] = true
 	}
 	fp := t.Fingerprint

@@ -41,6 +41,10 @@ func Run(ctx context.Context, p profile.Profile, s profile.Settings, hooks Hooks
 		log.Printf("ℹ️  %s runs on the %s core: %s", p.Name, core, coreReason(&p))
 		s.Core = core
 	}
+	if (p.TLS.PinnedCertSHA256 != "" || p.TLS.VerifyByName != "") && s.Core != profile.CoreXray {
+		log.Printf("⚠️  %s trusts its server's certificate by hash, which only Xray can check: "+
+			"on %s the certificate is not verified", p.Name, s.Core)
+	}
 	if s.AllowLAN && s.ProxyUser == "" {
 		log.Printf("⚠️  LAN sharing is on without a proxy password: anyone on the network can use this proxy")
 	}
@@ -333,6 +337,8 @@ func coreReason(p *profile.Profile) string {
 		return p.Type + " needs sing-box"
 	case p.Transport.Network == "xhttp":
 		return "the xhttp transport needs Xray"
+	case p.TLS.PinnedCertSHA256 != "" || p.TLS.VerifyByName != "":
+		return "the account trusts its server's certificate by hash or by other names, which only Xray checks"
 	case p.Transport.HeaderType == "http":
 		return "Xray speaks the TCP HTTP header natively (sing-box only emulates it, which some servers refuse)"
 	case p.Transport.Network == "ws", p.Transport.Network == "httpupgrade":

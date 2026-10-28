@@ -100,6 +100,13 @@ type TLS struct {
 	Insecure         bool     `json:"insecure,omitempty"`
 	RealityPublicKey string   `json:"reality_public_key,omitempty"`
 	RealityShortID   string   `json:"reality_short_id,omitempty"`
+	// PinnedCertSHA256 trusts a server certificate by the SHA-256 of a
+	// certificate in its chain (hex, comma-separated; share links' "pcs"),
+	// instead of by name: providers use it to front through a CDN whose
+	// certificate doesn't carry the SNI they send. VerifyByName ("vcn")
+	// checks the certificate against these names instead of the SNI.
+	PinnedCertSHA256 string `json:"pinned_cert_sha256,omitempty"`
+	VerifyByName     string `json:"verify_by_name,omitempty"`
 }
 
 // NewID returns a short random profile id.
@@ -192,6 +199,14 @@ func (p *Profile) Validate() error {
 		}
 	default:
 		return fmt.Errorf("unsupported tcp header %q", p.Transport.HeaderType)
+	}
+	for _, pin := range strings.Split(p.TLS.PinnedCertSHA256, ",") {
+		if pin = strings.ReplaceAll(strings.TrimSpace(pin), ":", ""); pin == "" {
+			continue
+		}
+		if b, err := hex.DecodeString(pin); err != nil || len(b) != 32 {
+			return fmt.Errorf("tls: pinned certificate %q is not a SHA-256 in hex", pin)
+		}
 	}
 	switch p.TLS.Mode {
 	case "", "tls":

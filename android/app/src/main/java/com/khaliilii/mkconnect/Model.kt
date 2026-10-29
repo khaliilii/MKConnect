@@ -87,6 +87,7 @@ data class Settings(
     val directIran: Boolean,
     val fakeDns: Boolean,
     val failover: Boolean,
+    val blockQuic: Boolean,
 ) {
     fun toJson(): String = JSONObject().apply {
         put("mode", if (vpnMode) "vpn" else "proxy")
@@ -105,6 +106,7 @@ data class Settings(
         put("direct_iran", directIran)
         put("fake_dns", fakeDns)
         put("failover", failover)
+        put("block_quic", blockQuic)
     }.toString()
 }
 
@@ -125,8 +127,9 @@ fun loadSettings(): Settings {
         tunMtu = o.optInt("tun_mtu"),
         clipboardImport = o.optBoolean("clipboard_import"),
         directIran = o.optBoolean("direct_iran", true),
-        fakeDns = o.optBoolean("fake_dns"),
+        fakeDns = o.optBoolean("fake_dns", true),
         failover = o.optBoolean("failover", true),
+        blockQuic = o.optBoolean("block_quic", true),
     )
 }
 

@@ -77,8 +77,17 @@ type Settings struct {
 	// FakeDNS answers name lookups in TUN mode at once with a placeholder
 	// address (FakeIP, 198.18.0.0/15) that sing-box maps back to the name, so
 	// the server looks the name up and a new site doesn't first wait for a
-	// DNS round trip through the tunnel. Off by default.
+	// DNS round trip through the tunnel. On by default: measured in TUN mode,
+	// lookups through the tunnel took ~1 s and often 5-12 s.
 	FakeDNS bool `json:"fake_dns"`
+
+	// BlockQUIC refuses QUIC (UDP 443) in TUN mode so browsers use TCP,
+	// which these tunnels carry far better. On by default.
+	BlockQUIC bool `json:"block_quic"`
+
+	// Version is the settings layout the file was written with; Load uses
+	// it to apply changed defaults once (see migrate).
+	Version int `json:"settings_version,omitempty"`
 
 	// SortBy orders the account list: "" (as added), "latency" or "speed".
 	SortBy string `json:"sort_by,omitempty"`
@@ -108,7 +117,23 @@ func DefaultSettings() Settings {
 		AutoReconnect:   true,
 		DirectIran:      true,
 		Failover:        true,
+		BlockQUIC:       true,
+		FakeDNS:         true,
+		Version:         settingsVersion,
 	}
+}
+
+// settingsVersion is the current settings layout:
+//
+//	2: Fast DNS on (v2.0.0-beta.7 had shipped it off, so nobody had chosen off)
+const settingsVersion = 2
+
+// migrate applies defaults that changed since the file was written.
+func (s *Settings) migrate() {
+	if s.Version < 2 {
+		s.FakeDNS = true
+	}
+	s.Version = settingsVersion
 }
 
 // ListenAddress returns the IP the local proxy binds to.
@@ -182,9 +207,11 @@ func Load(path string) (*Store, error) {
 	if err != nil {
 		return nil, fmt.Errorf("read %s: %w", path, err)
 	}
+	s.Settings.Version = 0 // a file without one predates versions
 	if err := json.Unmarshal(data, s); err != nil {
 		return nil, fmt.Errorf("parse %s: %w", path, err)
 	}
+	s.Settings.migrate()
 	s.repairIDs()
 	return s, nil
 }

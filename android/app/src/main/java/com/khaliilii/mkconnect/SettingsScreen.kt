@@ -94,6 +94,10 @@ fun SettingsScreen(options: Options, status: Status, onMessage: (String) -> Unit
                 "Fast DNS (FakeIP): new sites don't wait for a DNS lookup through the tunnel",
                 s.fakeDns,
             ) { save(s.copy(fakeDns = it)) }
+            SwitchRow(
+                "Block QUIC (HTTP/3): apps use TCP, which the tunnel carries much better",
+                s.blockQuic,
+            ) { save(s.copy(blockQuic = it)) }
         }
         SwitchRow(
             "Add share links found on the clipboard when the app opens",

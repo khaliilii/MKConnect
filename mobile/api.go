@@ -328,6 +328,7 @@ type mobileSettings struct {
 	DirectIran bool `json:"direct_iran"`
 	FakeDNS    bool `json:"fake_dns"`
 	Failover   bool `json:"failover"`
+	BlockQUIC  bool `json:"block_quic"`
 }
 
 // Settings returns the phone settings as JSON.
@@ -347,7 +348,7 @@ func Settings() (string, error) {
 		ProxyUser: st.ProxyUser, ProxyPass: st.ProxyPass, RemoteDNS: st.RemoteDNS, IPv6: st.IPv6,
 		LogLevel: st.LogLevel, AutoReconnect: st.AutoReconnect, SortBy: st.SortBy,
 		TUNStack: st.TUNStack, TUNMTU: st.TUNMTU, ClipboardImport: st.ClipboardImport,
-		DirectIran: st.DirectIran, FakeDNS: st.FakeDNS, Failover: st.Failover})
+		DirectIran: st.DirectIran, FakeDNS: st.FakeDNS, Failover: st.Failover, BlockQUIC: st.BlockQUIC})
 	return string(data), nil
 }
 
@@ -367,6 +368,7 @@ func SetSettings(data string) error {
 	st.ListenPort, st.AllowLAN, st.ProxyUser, st.ProxyPass, st.IPv6 = in.Port, in.AllowLAN, in.ProxyUser, in.ProxyPass, in.IPv6
 	st.AutoReconnect, st.SortBy, st.ClipboardImport, st.Failover = in.AutoReconnect, in.SortBy, in.ClipboardImport, in.Failover
 	st.TUNStack, st.TUNMTU, st.DirectIran, st.FakeDNS = in.TUNStack, in.TUNMTU, in.DirectIran, in.FakeDNS
+	st.BlockQUIC = in.BlockQUIC
 	if in.RemoteDNS != "" {
 		st.RemoteDNS = in.RemoteDNS
 	}

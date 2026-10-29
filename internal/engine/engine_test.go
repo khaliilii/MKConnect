@@ -279,7 +279,7 @@ func TestTUNRefusesTheBlockPage(t *testing.T) {
 	rules := cfg["route"].(obj)["rules"].([]obj)
 	reject, private := -1, -1
 	for i, r := range rules {
-		if r["action"] == "reject" && slices.Contains(r["ip_cidr"].([]string), "10.10.34.0/24") {
+		if cidrs, _ := r["ip_cidr"].([]string); r["action"] == "reject" && slices.Contains(cidrs, "10.10.34.0/24") {
 			reject = i
 		}
 		if r["ip_is_private"] == true {
@@ -429,6 +429,79 @@ func TestMuxConfig(t *testing.T) {
 		}
 		if got := PreferredCore(&vision, &s); got != profile.CoreSingBox {
 			t.Errorf("a vision account moved to %s although mux doesn't apply", got)
+		}
+	}
+}
+
+// TestBlockQUIC: in TUN mode QUIC is refused after the direct rules (so
+// Iranian sites keep it), and sing-box accepts the rule; proxy mode has none.
+func TestBlockQUIC(t *testing.T) {
+	s := testSettings(t)
+	s.BlockQUIC, s.DirectIran = true, true
+	quicAt := func(rules []obj) int {
+		for i, r := range rules {
+			if r["network"] == "udp" && r["port"] == 443 && r["action"] == "reject" {
+				return i
+			}
+		}
+		return -1
+	}
+	cfg, err := singBoxConfig(&testProfiles[0], &s, &tunOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	rules := cfg["route"].(obj)["rules"].([]obj)
+	i := quicAt(rules)
+	if i < 0 {
+		t.Fatal("QUIC isn't refused in TUN mode")
+	}
+	for _, r := range rules[i:] {
+		if r["domain_suffix"] != nil {
+			t.Error("the Iranian direct rule comes after the QUIC block")
+		}
+	}
+	if startSingBox != nil {
+		data, _ := marshal(cfg)
+		if err := parseSingBox(data); err != nil {
+			t.Fatalf("sing-box refused the rule: %v", err)
+		}
+	}
+	proxy, _ := singBoxConfig(&testProfiles[0], &s, nil)
+	if quicAt(proxy["route"].(obj)["rules"].([]obj)) >= 0 {
+		t.Error("QUIC blocked in proxy mode")
+	}
+	s.BlockQUIC = false
+	off, _ := singBoxConfig(&testProfiles[0], &s, &tunOptions{})
+	if quicAt(off["route"].(obj)["rules"].([]obj)) >= 0 {
+		t.Error("switched off, QUIC is still refused")
+	}
+	if !profile.DefaultSettings().BlockQUIC {
+		t.Error("QUIC blocking should be on by default")
+	}
+}
+
+// TestFakeDNSKeepsDirectSitesReal: with Fast DNS, sites that go out directly
+// are answered with their real address before the placeholder rule; a
+// placeholder would be looked up again through the system resolver, which
+// points back into the tunnel.
+func TestFakeDNSKeepsDirectSitesReal(t *testing.T) {
+	s := testSettings(t)
+	s.FakeDNS, s.DirectIran = true, true
+	cfg, err := singBoxConfig(&testProfiles[0], &s, &tunOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	rules := cfg["dns"].(obj)["rules"].([]obj)
+	if len(rules) < 2 || rules[0]["server"] != tagRemote || !slices.Contains(rules[0]["domain_suffix"].([]string), ".ir") {
+		t.Fatalf("Iranian names should be answered for real first: %v", rules)
+	}
+	if rules[1]["server"] != tagFake {
+		t.Fatalf("the placeholder rule should follow: %v", rules[1])
+	}
+	if startSingBox != nil {
+		data, _ := marshal(cfg)
+		if err := parseSingBox(data); err != nil {
+			t.Fatal(err)
 		}
 	}
 }

@@ -72,10 +72,15 @@ A multi-account client for **SSH, VMess, VLESS, Trojan, Shadowsocks, Hysteria2 a
   doesn't apply to XTLS Vision (REALITY) accounts, which stay as they are. `mkconnect settings set mux true`
   Measured (4 accounts, 2 rounds): a new connection answers in half the time and a page's burst of requests
   finishes ~15% sooner, but downloads over several streams get slower, since they share one connection
-- **Fast DNS** (FakeIP, TUN mode, off by default): a lookup is answered at once with a placeholder address
+- **Fast DNS** (FakeIP, TUN mode, on by default): a lookup is answered at once with a placeholder address
   (198.18.0.0/15) that is mapped back to the name, and the server looks the name up, so a new site doesn't first
-  wait for a DNS round trip through the tunnel. The answers live 10 s, so nothing stale outlasts the connection.
-  `mkconnect settings set fake-dns true`
+  wait for a DNS round trip through the tunnel. Measured in TUN mode on a VMess account: lookups through the
+  tunnel took ~1 s (median) and 5-12 s for one in three; with Fast DNS 2 ms, and the first byte of a page came
+  three times sooner. Sites that go out directly (Iranian sites) still get their real address. The answers live
+  10 s, so nothing stale outlasts the connection. `mkconnect settings set fake-dns false` switches it off
+- **Block QUIC** (TUN mode, on by default): HTTP/3 over UDP rides on the server's TCP connection through the
+  tunnel and stalls, and browsers wait before falling back; refused, they use TCP at once. Iranian sites keep it.
+  `mkconnect settings set block-quic false`
 - **log files**: every run's complete log (the app's messages, the cores' output and a crash report if it
   crashes) is saved to a `logs` folder next to the program, or, where that can't be written (Program Files,
   a macOS app bundle, /usr/bin), to the user's config folder (`%AppData%\mkconnect\logs`,
@@ -136,7 +141,8 @@ mkconnect settings set proxy-user me
 mkconnect settings set proxy-pass secret
 mkconnect settings set direct-iran false            # Iranian sites through the server too
 mkconnect settings set mux true                     # many connections over one (Xray Mux.Cool)
-mkconnect settings set fake-dns true                # TUN: answer lookups at once (FakeIP)
+mkconnect settings set fake-dns false               # TUN: real DNS lookups through the tunnel instead of FakeIP
+mkconnect settings set block-quic false             # TUN: let QUIC (HTTP/3) through the tunnel
 
 # external core
 mkconnect settings set external-path /usr/local/bin/sing-box

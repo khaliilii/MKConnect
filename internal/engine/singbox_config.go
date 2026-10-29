@@ -174,15 +174,23 @@ func singBoxBase(s *profile.Settings, proxyOut obj, tun *tunOptions) obj {
 				fake["inet6_range"] = "fc00::/18"
 			}
 			dns["servers"] = append(dns["servers"].([]obj), fake)
-			dns["rules"] = []obj{
+			var dnsRules []obj
+			if s.DirectIran {
+				// Sites that go out directly need their real address: the
+				// direct connection would otherwise look the name up again
+				// with the system resolver, which points into this tunnel and
+				// answers with a placeholder again (macOS).
+				dnsRules = append(dnsRules, obj{"domain_suffix": iranDomains(), "server": tagRemote})
+			}
+			dns["rules"] = append(dnsRules,
 				// A short TTL: a placeholder cached by an app outlives the
 				// connection and leads nowhere once it stops.
-				{"query_type": []string{"A", "AAAA"}, "server": tagFake, "rewrite_ttl": 10},
+				obj{"query_type": []string{"A", "AAAA"}, "server": tagFake, "rewrite_ttl": 10},
 				// HTTPS records carry real addresses that would bypass the
 				// placeholders (and need a round trip): answer them empty,
 				// browsers then use the A record.
-				{"query_type": []string{"HTTPS", "SVCB"}, "action": "predefined", "rcode": "NOERROR"},
-			}
+				obj{"query_type": []string{"HTTPS", "SVCB"}, "action": "predefined", "rcode": "NOERROR"},
+			)
 		}
 		rules = append([]obj{
 			{"action": "sniff"},
@@ -194,6 +202,13 @@ func singBoxBase(s *profile.Settings, proxyOut obj, tun *tunOptions) obj {
 			// the tunnel.
 			{"ip_cidr": blockPageCIDRs, "action": "reject"},
 		}, rules...)
+		if s.BlockQUIC {
+			// QUIC (HTTP/3, UDP 443) through the tunnel rides over the
+			// server's TCP connection, stalls, and browsers wait before
+			// falling back. Refused, they use TCP at once. Iranian and local
+			// sites matched above still get it directly.
+			rules = append(rules, obj{"network": "udp", "port": 443, "action": "reject"})
+		}
 	}
 
 	route := obj{

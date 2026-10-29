@@ -83,6 +83,17 @@ func Run(ctx context.Context, p profile.Profile, s profile.Settings, hooks Hooks
 		}
 		defer end() // runs last: after the cores and the gateway have restored everything
 	}
+	if s.Mode == profile.ModeProxy {
+		// The proxy runs fine on top of another VPN, but every connection to
+		// the server then goes through that VPN first: two tunnels, slower.
+		if iface, err := tunnelDefaultRoute(); err == nil && iface != "" {
+			who := ""
+			if apps := runningVPNApps(); len(apps) > 0 {
+				who = " (probably " + strings.Join(apps, " or ") + ")"
+			}
+			log.Printf("⚠️  another VPN is active on %s%s: the connection to the server goes through it, which makes everything slower. Disconnect it for full speed", iface, who)
+		}
+	}
 
 	if s.Mode == profile.ModeTUN {
 		// Runs after the cores have closed (defers run in reverse order).

@@ -44,6 +44,11 @@ var settingKeys = map[string]func(s *profile.Settings, v string) error{
 		s.Failover = b
 		return err
 	},
+	"block-quic": func(s *profile.Settings, v string) error {
+		b, err := strconv.ParseBool(v)
+		s.BlockQUIC = b
+		return err
+	},
 	"fake-dns": func(s *profile.Settings, v string) error {
 		b, err := strconv.ParseBool(v)
 		s.FakeDNS = b
@@ -101,6 +106,7 @@ func newSettingsCmd() *cobra.Command {
 			fmt.Printf("mux:           %t\n", s.Mux)
 			fmt.Printf("direct-iran:   %t\n", s.DirectIran)
 			fmt.Printf("fake-dns:      %t\n", s.FakeDNS)
+			fmt.Printf("block-quic:    %t\n", s.BlockQUIC)
 			if s.TUNStack != "" || s.TUNMTU > 0 {
 				fmt.Printf("tun-stack:     %s\ntun-mtu:       %d\n", s.TUNStack, s.TUNMTU)
 			}
@@ -109,7 +115,7 @@ func newSettingsCmd() *cobra.Command {
 	}
 	set := &cobra.Command{
 		Use:   "set <key> <value>",
-		Short: "Change a setting (core, mode, external-path, external-kind, port, lan, proxy-user, proxy-pass, remote-dns, log-level, share, auto-reconnect, failover, mux, direct-iran, fake-dns, ipv6, tun-stack, tun-mtu)",
+		Short: "Change a setting (core, mode, external-path, external-kind, port, lan, proxy-user, proxy-pass, remote-dns, log-level, share, auto-reconnect, failover, mux, direct-iran, fake-dns, block-quic, ipv6, tun-stack, tun-mtu)",
 		Example: `  mkconnect settings set core xray
   mkconnect settings set mode tun
   mkconnect settings set lan true

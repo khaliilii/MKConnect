@@ -257,3 +257,32 @@ func TestBackups(t *testing.T) {
 		t.Fatalf("backups %v, want %v", got, want)
 	}
 }
+
+// TestSettingsMigration: a file from before settings versions gets Fast DNS
+// switched on once; a current file keeps the user's choice.
+func TestSettingsMigration(t *testing.T) {
+	dir := t.TempDir()
+	for _, c := range []struct {
+		file string
+		want bool
+	}{
+		{`{"settings":{"fake_dns":false,"block_quic":false},"profiles":[]}`, true},
+		{`{"settings":{"fake_dns":false,"settings_version":2},"profiles":[]}`, false},
+		{`{"settings":{},"profiles":[]}`, true},
+	} {
+		path := filepath.Join(dir, "p.json")
+		if err := os.WriteFile(path, []byte(c.file), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		s, err := Load(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if s.Settings.FakeDNS != c.want || s.Settings.Version != settingsVersion {
+			t.Errorf("%s: fake DNS %v (version %d), want %v", c.file, s.Settings.FakeDNS, s.Settings.Version, c.want)
+		}
+	}
+	if s, _ := Load(filepath.Join(dir, "missing.json")); !s.Settings.FakeDNS {
+		t.Error("a new store should have Fast DNS on")
+	}
+}

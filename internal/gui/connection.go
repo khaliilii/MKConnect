@@ -116,12 +116,15 @@ func (u *ui) newConnectionPanel() fyne.CanvasObject {
 	mux.SetChecked(s.Mux)
 	fakeDNS := widget.NewCheck("Fast DNS (FakeIP): new sites don't wait for a DNS lookup through the tunnel (TUN mode)", nil)
 	fakeDNS.SetChecked(s.FakeDNS)
+	blockQUIC := widget.NewCheck("Block QUIC (HTTP/3): browsers use TCP, which the tunnel carries much better (TUN mode)", nil)
+	blockQUIC.SetChecked(s.BlockQUIC)
 
 	updateVisibility := func() {
 		form.setVisible(extBox, s.Core == profile.CoreExternal)
 		form.setVisible(tunWarning, s.Mode == profile.ModeTUN && !isElevated())
 		form.setVisible(shareBox, s.Mode == profile.ModeTUN && !isMobile)
 		form.setVisible(fakeDNS, s.Mode == profile.ModeTUN)
+		form.setVisible(blockQUIC, s.Mode == profile.ModeTUN)
 		form.setVisible(failover, s.AutoReconnect)
 		shareHint.SetText(shareHintText(s.ShareInterfaces))
 		form.setVisible(lanInfo, s.AllowLAN)
@@ -146,6 +149,7 @@ func (u *ui) newConnectionPanel() fyne.CanvasObject {
 		s.DirectIran = directIran.Checked
 		s.Mux = mux.Checked
 		s.FakeDNS = fakeDNS.Checked
+		s.BlockQUIC = blockQUIC.Checked
 		updateVisibility()
 		u.save()
 	}
@@ -160,6 +164,7 @@ func (u *ui) newConnectionPanel() fyne.CanvasObject {
 	directIran.OnChanged = func(bool) { changed() }
 	mux.OnChanged = func(bool) { changed() }
 	fakeDNS.OnChanged = func(bool) { changed() }
+	blockQUIC.OnChanged = func(bool) { changed() }
 	share.OnChanged = func(labels []string) {
 		if runtime.GOOS == "windows" && len(labels) > 1 {
 			// Internet Connection Sharing supports one adapter: keep the newest choice.
@@ -195,6 +200,7 @@ func (u *ui) newConnectionPanel() fyne.CanvasObject {
 		{Text: "", Widget: directIran},
 		{Text: "", Widget: mux},
 		{Text: "", Widget: fakeDNS},
+		{Text: "", Widget: blockQUIC},
 	})
 	updateVisibility()
 	u.settingsBox = settings

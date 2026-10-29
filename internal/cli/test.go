@@ -68,7 +68,7 @@ shown by "profile list" and the app.`,
 			ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
 			defer stop()
 
-			results := engine.TestMany(ctx, store.Profiles, idx, store.Settings, engine.TestOptions{Speed: speed}, parallel,
+			results := engine.TestMany(ctx, store.Profiles, idx, store.Settings, engine.TestOptions{Speed: speed, Load: speed}, parallel,
 				func(i int, r *profile.TestResult) {
 					fmt.Fprintf(os.Stderr, "%-40s %s\n", store.Profiles[i].Name, describe(r))
 				})

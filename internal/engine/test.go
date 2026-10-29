@@ -11,6 +11,7 @@ import (
 	"slices"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/khaliilii/MKConnect/internal/profile"
@@ -22,6 +23,9 @@ type TestOptions struct {
 	Timeout   time.Duration // per probe (default 6s)
 	Speed     bool          // also measure download speed
 	SpeedTime time.Duration // speed test duration cap (default 6s)
+	// Load also opens LoadURLs all at once with the speed test (see
+	// loadCheck); it needs Speed.
+	Load bool
 }
 
 // Test endpoints, overridable in tests. The latency probe is HTTPS, so a
@@ -47,7 +51,27 @@ var (
 		"https://cachefly.cachefly.net/10mb.test",
 		"https://proof.ovh.net/files/10Mb.dat",
 	}
+	// LoadURLs are opened all at once by the load check, like a browser
+	// starting a page: the hosts the big sites load from, each on a new
+	// connection through the server.
+	LoadURLs = []string{
+		"https://www.youtube.com/", "https://i.ytimg.com/generate_204", "https://yt3.ggpht.com/",
+		"https://www.google.com/", "https://www.gstatic.com/generate_204", "https://fonts.googleapis.com/css2?family=Roboto",
+		"https://accounts.google.com/", "https://play.google.com/", "https://www.instagram.com/",
+		"https://static.cdninstagram.com/", "https://www.facebook.com/", "https://static.xx.fbcdn.net/",
+		"https://web.telegram.org/a/", "https://telegram.org/", "https://x.com/",
+		"https://abs.twimg.com/", "https://pbs.twimg.com/", "https://github.com/",
+		"https://en.wikipedia.org/wiki/Main_Page", "https://www.apple.com/", "https://www.cloudflare.com/",
+		"https://www.microsoft.com/", "https://www.bbc.com/", "https://www.mozilla.org/",
+	}
 )
+
+// Load check limits: each page is read up to loadBytes (what gets stuck is
+// mostly the start of a connection, so the start is enough), and a request
+// that receives nothing for loadStall (a variable for tests) counts as stuck.
+const loadBytes = 16 << 10
+
+var loadStall = 5 * time.Second
 
 // openSpeedStream starts a download for a speed measurement: SpeedURL, or
 // the first fallback that answers 200.
@@ -188,8 +212,66 @@ func Test(ctx context.Context, p profile.Profile, s profile.Settings, o TestOpti
 		if err != nil && r.Speed == 0 {
 			r.Error = "speed: " + shortError(err)
 		}
+		if o.Load {
+			r.Parallel, r.Stuck = len(LoadURLs), loadCheck(ctx, port)
+		}
 	}
 	return r
+}
+
+// loadCheck opens LoadURLs all at once and returns how many got stuck: no
+// data for loadStall, or cut off. On some networks a server answers a probe
+// quickly and downloads fast over one connection, yet a share of parallel
+// connections freezes midway (filtering going after them): every page then
+// hangs on one of its parts, which only a test like this shows.
+func loadCheck(ctx context.Context, port int) int {
+	var stuck atomic.Int32
+	var wg sync.WaitGroup
+	for _, u := range LoadURLs {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			if !loadOne(ctx, port, u) {
+				stuck.Add(1)
+			}
+		}()
+	}
+	wg.Wait()
+	return int(stuck.Load())
+}
+
+// loadOne fetches the start of a page; false when it stalls or fails. Any
+// HTTP answer whose body keeps arriving is fine: the server got through.
+func loadOne(ctx context.Context, port int, target string) bool {
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
+	c := proxyClient(port, 0)
+	defer c.CloseIdleConnections()
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, target, nil)
+	if err != nil {
+		return false
+	}
+	req.Header.Set("User-Agent", "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/141.0 Safari/537.36")
+	stall := time.AfterFunc(loadStall, cancel) // reset on every chunk that arrives
+	defer stall.Stop()
+	resp, err := c.Do(req)
+	if err != nil {
+		return false
+	}
+	defer resp.Body.Close()
+	buf := make([]byte, 8<<10)
+	for n := 0; n < loadBytes; {
+		stall.Reset(loadStall)
+		m, err := resp.Body.Read(buf)
+		n += m
+		if errors.Is(err, io.EOF) {
+			return true
+		}
+		if err != nil {
+			return false
+		}
+	}
+	return true
 }
 
 // PreferredCore is the core that runs a profile best: the configured one,
@@ -440,7 +522,7 @@ func TestMany(ctx context.Context, profiles []profile.Profile, idx []int, s prof
 			}
 			r := *results[i] // a copy: the first result may still be in use by the caller
 			if sr := Test(ctx, profiles[i], s, o); sr.OK() && sr.Speed > 0 {
-				r.Speed = sr.Speed
+				r.Speed, r.Parallel, r.Stuck = sr.Speed, sr.Parallel, sr.Stuck
 			} else if sr.Error != "" {
 				r.Error = "speed: " + strings.TrimPrefix(sr.Error, "speed: ")
 			}

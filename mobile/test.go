@@ -104,7 +104,7 @@ func StartTest(ids string, speed bool) error {
 		defer cancel()
 		// Speed samples are capped at 4 s an account: enough to rank servers
 		// without spending much of the user's data.
-		results := engine.TestMany(ctx, profiles, idx, settings, engine.TestOptions{Speed: speed, SpeedTime: 4 * time.Second}, 4,
+		results := engine.TestMany(ctx, profiles, idx, settings, engine.TestOptions{Speed: speed, SpeedTime: 4 * time.Second, Load: speed}, 4,
 			func(i int, r *profile.TestResult) {
 				testMu.Lock()
 				if r.Speed == 0 {

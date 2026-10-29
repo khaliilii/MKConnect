@@ -286,3 +286,27 @@ func TestSettingsMigration(t *testing.T) {
 		t.Error("a new store should have Fast DNS on")
 	}
 }
+
+// TestStuckAccountsSortBehind: an account whose parallel pages got stuck
+// sorts behind a slower one whose didn't, and says so.
+func TestStuckAccountsSortBehind(t *testing.T) {
+	ps := []Profile{
+		{ID: "fast-stuck", Test: &TestResult{Sent: 1, Received: 1, Latency: 80, Speed: 5 << 20, Parallel: 12, Stuck: 2}},
+		{ID: "slow-clean", Test: &TestResult{Sent: 1, Received: 1, Latency: 200, Speed: 1 << 20, Parallel: 12}},
+		{ID: "one-stuck", Test: &TestResult{Sent: 1, Received: 1, Latency: 90, Speed: 4 << 20, Parallel: 12, Stuck: 1}},
+	}
+	for _, by := range []string{SortSpeed, SortLatency} {
+		idx := []int{0, 1, 2}
+		SortProfiles(ps, idx, by)
+		var got []string
+		for _, i := range idx {
+			got = append(got, ps[i].ID)
+		}
+		if want := []string{"slow-clean", "one-stuck", "fast-stuck"}; !slices.Equal(got, want) {
+			t.Errorf("by %s: %v, want %v", by, got, want)
+		}
+	}
+	if s := ps[0].Test.Summary(); !strings.Contains(s, "2/12 stuck") {
+		t.Errorf("summary %q doesn't say pages got stuck", s)
+	}
+}

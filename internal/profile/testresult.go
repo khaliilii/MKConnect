@@ -22,6 +22,10 @@ type TestResult struct {
 	Jitter   int       `json:"jitter_ms"`          // max - min of the successful probes
 	Speed    int64     `json:"speed_bps,omitzero"` // download bytes/s, 0 = not measured
 	Error    string    `json:"error,omitempty"`    // why the server failed
+	// Parallel pages opened at once by the load check, and how many of them
+	// got stuck (0 = not checked).
+	Parallel int `json:"parallel,omitzero"`
+	Stuck    int `json:"stuck,omitzero"`
 }
 
 // OK reports whether the server answered at least once.
@@ -41,6 +45,9 @@ func (r *TestResult) Summary() string {
 	}
 	if r.Speed > 0 {
 		s += " · " + FormatBytes(r.Speed) + "/s"
+	}
+	if r.Stuck > 0 {
+		s += fmt.Sprintf(" · %d/%d stuck", r.Stuck, r.Parallel)
 	}
 	return s
 }
@@ -73,6 +80,11 @@ func SortProfiles(profiles []Profile, idx []int, by string) {
 		}
 		if !ra.OK() {
 			return false
+		}
+		// Pages hang on an account whose connections get stuck, however
+		// fast it is: those go behind the ones that passed the load check.
+		if ra.Stuck != rb.Stuck {
+			return ra.Stuck < rb.Stuck
 		}
 		if by == SortSpeed && ra.Speed != rb.Speed {
 			return ra.Speed > rb.Speed

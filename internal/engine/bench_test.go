@@ -72,3 +72,53 @@ func TestBenchmark(t *testing.T) {
 		t.Error("a dead server scored as well as a working one")
 	}
 }
+
+// TestLoadCheck: pages opened at once through a working account; the one
+// that sends a little and then freezes counts as stuck, the rest don't.
+func TestLoadCheck(t *testing.T) {
+	if startSingBox == nil {
+		t.Skip("sing-box not compiled in")
+	}
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/big": // more than the check reads
+			io.WriteString(w, strings.Repeat("x", 200<<10))
+		case "/stall": // what a frozen connection looks like
+			io.WriteString(w, strings.Repeat("x", 8<<10))
+			w.(http.Flusher).Flush()
+			select {
+			case <-r.Context().Done():
+			case <-time.After(5 * time.Second):
+			}
+		case "/forbidden": // an answer is an answer: the server got through
+			http.Error(w, "no", http.StatusForbidden)
+		default:
+			io.WriteString(w, "small page")
+		}
+	}))
+	defer srv.Close()
+	base := strings.Replace(srv.URL, "127.0.0.1", "localhost", 1)
+	oldURLs, oldStall := LoadURLs, loadStall
+	LoadURLs = []string{base + "/a", base + "/big", base + "/stall", base + "/forbidden", base + "/b"}
+	loadStall = 500 * time.Millisecond
+	defer func() { LoadURLs, loadStall = oldURLs, oldStall }()
+
+	port := freePort(t)
+	startProtocolServer(t, []obj{{
+		"type": "shadowsocks", "tag": "ss", "listen": "127.0.0.1", "listen_port": port,
+		"method": "aes-256-gcm", "password": "pw",
+	}})
+	p := profile.Profile{Name: "ss", Type: profile.TypeShadowsocks, Server: "127.0.0.1", Port: port, Method: "aes-256-gcm", Password: "pw"}
+	lp, _, stop, err := startPrivate(t.Context(), &p, new(testSettings(t)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer stop()
+	start := time.Now()
+	if got := loadCheck(t.Context(), lp); got != 1 {
+		t.Errorf("stuck = %d, want 1 (only the frozen page)", got)
+	}
+	if took := time.Since(start); took > 3*time.Second {
+		t.Errorf("the check took %s: a frozen page should be given up after the stall limit", took)
+	}
+}

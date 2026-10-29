@@ -84,7 +84,7 @@ func (u *ui) setSort(by string) {
 
 func (u *ui) testShown(speed bool) {
 	idx := append([]int(nil), u.visible...)
-	u.runTests(idx, engine.TestOptions{Speed: speed}, nil)
+	u.runTests(idx, engine.TestOptions{Speed: speed, Load: speed}, nil)
 }
 
 // rankSpeedTime caps each account's download in "Update & test": long enough
@@ -143,7 +143,7 @@ func (u *ui) updateAndRank() {
 			finished()
 			return
 		}
-		u.runTests(idx, engine.TestOptions{Speed: true, SpeedTime: rankSpeedTime}, func() {
+		u.runTests(idx, engine.TestOptions{Speed: true, SpeedTime: rankSpeedTime, Load: true}, func() {
 			u.setSort(profile.SortSpeed)
 			finished()
 		})
@@ -189,7 +189,7 @@ func (u *ui) testSelected() {
 	}
 	for i := range u.store.Profiles {
 		if u.store.Profiles[i].ID == p.ID {
-			u.runTests([]int{i}, engine.TestOptions{Speed: true}, nil)
+			u.runTests([]int{i}, engine.TestOptions{Speed: true, Load: true}, nil)
 			return
 		}
 	}

@@ -53,23 +53,42 @@ class MkVpnService : VpnService(), Platform {
         // Restarted by the system (no intent) or by always-on VPN: connect as a VPN.
         val vpn = intent?.getBooleanExtra(EXTRA_VPN, true) ?: true
         when (intent?.action) {
-            ACTION_STOP -> worker.execute {
+            ACTION_STOP -> queue {
                 disconnect()
                 stopSelfResult(startId) // only if no newer command came in
             }
             ACTION_SWITCH -> {
                 goForeground("Switching account…")
-                worker.execute {
+                queue {
                     disconnect()
                     connect(vpn, startId)
                 }
             }
             else -> {
                 goForeground("Connecting…")
-                worker.execute { connect(vpn, startId) }
+                queue { connect(vpn, startId) }
             }
         }
         return START_STICKY
+    }
+
+    /**
+     * Queues a task on [worker]. A failure in it is reported in the app
+     * instead of taking the app down, and leaves the network as it was.
+     */
+    private fun queue(task: () -> Unit) {
+        runCatching {
+            worker.execute {
+                try {
+                    task()
+                } catch (e: Throwable) {
+                    Log.e(TAG, "service task failed", e)
+                    lastError = "The VPN service failed: ${e.message ?: e.javaClass.simpleName}"
+                    runCatching { disconnect() }
+                    stopSelf()
+                }
+            }
+        }
     }
 
     private fun goForeground(text: String) {
@@ -84,8 +103,8 @@ class MkVpnService : VpnService(), Platform {
     /** Runs on [worker]. */
     private fun connect(vpn: Boolean, startId: Int) {
         goForeground("Connecting…") // a disconnect just before may have left the foreground
-        watchDefaultNetwork()
         try {
+            watchDefaultNetwork()
             active = true
             Mkmobile.start(if (vpn) this else null)
             watchStatus(++generation, startId)
@@ -124,13 +143,11 @@ class MkVpnService : VpnService(), Platform {
                 val status = runCatching { loadStatus() }.getOrNull()
                 if (status != null && !status.busy) {
                     if (status.state == "error") lastError = status.error
-                    // The service may be gone already (a disconnect raced this).
-                    runCatching {
-                        worker.execute {
-                            if (gen == generation) {
-                                disconnect()
-                                stopSelfResult(startId) // not if a newer command came in
-                            }
+                    // queue: the service may be gone already (a disconnect raced this).
+                    queue {
+                        if (gen == generation) {
+                            disconnect()
+                            stopSelfResult(startId) // not if a newer command came in
                         }
                     }
                     break
@@ -148,11 +165,9 @@ class MkVpnService : VpnService(), Platform {
     override fun onRevoke() {
         // Another VPN took over or the user revoked the permission: whatever
         // is queued, the tunnel is gone.
-        runCatching {
-            worker.execute {
-                disconnect()
-                stopSelf()
-            }
+        queue {
+            disconnect()
+            stopSelf()
         }
     }
 
@@ -160,7 +175,7 @@ class MkVpnService : VpnService(), Platform {
         // Normally the connection was stopped before the service ends; if the
         // system ends it while connected, stop the core too. Never otherwise:
         // a new service's connection may already be starting.
-        if (active) runCatching { worker.execute { disconnect() } }
+        if (active) queue { disconnect() }
         worker.shutdown()
         super.onDestroy()
     }
@@ -268,10 +283,17 @@ class MkVpnService : VpnService(), Platform {
             .addCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)
             .addCapability(NetworkCapabilities.NET_CAPABILITY_NOT_VPN)
             .build()
-        if (Build.VERSION.SDK_INT >= 31) {
-            cm.registerBestMatchingNetworkCallback(request, callback, Handler(Looper.getMainLooper()))
-        } else {
-            cm.requestNetwork(request, callback)
+        try {
+            if (Build.VERSION.SDK_INT >= 31) {
+                cm.registerBestMatchingNetworkCallback(request, callback, Handler(Looper.getMainLooper()))
+            } else {
+                cm.requestNetwork(request, callback)
+            }
+        } catch (e: RuntimeException) {
+            // A phone that refuses the request (a SecurityException): follow
+            // the default network, which is the right one until this VPN is up.
+            Log.w(TAG, "network request refused, following the default network", e)
+            cm.registerDefaultNetworkCallback(callback)
         }
         networkCallback = callback
     }

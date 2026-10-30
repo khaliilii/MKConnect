@@ -10,6 +10,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"runtime/debug"
 	"strings"
 	"sync"
 	"time"
@@ -110,14 +111,24 @@ func SetDataDir(dir string) {
 	}
 	log.SetFlags(log.Ldate | log.Ltime)
 	log.SetOutput(io.MultiWriter(f, os.Stderr)) // os.Stderr is Android's logcat
+	// A crash of the core takes the app with it; its report is kept apart
+	// (core.log starts over with every connection) for the log screen.
+	if c, err := os.OpenFile(filepath.Join(dir, crashLog), os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o600); err == nil {
+		debug.SetCrashOutput(c, debug.CrashOptions{})
+		c.Close()
+	}
 }
 
-// ClearLogs empties the log file.
+// crashLog holds the reports of crashes, the core's and the app's.
+const crashLog = "crash.log"
+
+// ClearLogs empties the log and the crash reports.
 func ClearLogs() {
 	if dataDir == "" {
 		return
 	}
 	os.Truncate(filepath.Join(dataDir, "core.log"), 0)
+	os.Truncate(filepath.Join(dataDir, crashLog), 0)
 }
 
 // Start connects the active account. With a platform it runs as the
@@ -257,11 +268,18 @@ func Logs(maxLines int32) string {
 	if dataDir == "" {
 		return ""
 	}
-	data, err := os.ReadFile(filepath.Join(dataDir, "core.log"))
-	if err != nil {
-		return ""
+	var lines []string
+	// The last crash first: the log after it is a new connection's.
+	if crash, _ := os.ReadFile(filepath.Join(dataDir, crashLog)); len(strings.TrimSpace(string(crash))) > 0 {
+		lines = append(lines, "💥 The app crashed before (this report stays until the log is cleared):")
+		report := strings.Split(strings.TrimRight(string(crash), "\n"), "\n")
+		lines = append(lines, report[max(0, len(report)-200):]...)
+		lines = append(lines, "──────────")
 	}
-	lines := strings.Split(strings.TrimRight(string(data), "\n"), "\n")
+	data, _ := os.ReadFile(filepath.Join(dataDir, "core.log"))
+	if text := strings.TrimRight(string(data), "\n"); text != "" {
+		lines = append(lines, strings.Split(text, "\n")...)
+	}
 	if n := int(maxLines); n > 0 && len(lines) > n {
 		lines = lines[len(lines)-n:]
 	}

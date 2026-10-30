@@ -4,6 +4,8 @@ import (
 	"encoding/json"
 	"errors"
 	"net"
+	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"testing"
@@ -160,5 +162,27 @@ func TestSessionShowsHowThePhoneRuns(t *testing.T) {
 	stored.Mode = profile.ModeTUN
 	if proxy := newSession(p, stored, false, profile.CoreSingBox, nil); len(proxy.Inbounds) != 1 {
 		t.Errorf("proxy mode: %+v", proxy)
+	}
+}
+
+// TestLogsShowTheLastCrash: a crash report (the core's or the app's) comes
+// first in the log screen, survives a new connection's log, and goes with
+// Clear.
+func TestLogsShowTheLastCrash(t *testing.T) {
+	old := dataDir
+	defer func() { dataDir = old }()
+	dataDir = t.TempDir()
+	os.WriteFile(filepath.Join(dataDir, "core.log"), []byte("connected\n"), 0o600)
+	if got := Logs(100); got != "connected" {
+		t.Fatalf("without a crash: %q", got)
+	}
+	os.WriteFile(filepath.Join(dataDir, crashLog), []byte("FATAL EXCEPTION: mkconnect-service\n"), 0o600)
+	lines := strings.Split(Logs(100), "\n")
+	if len(lines) != 4 || !strings.HasPrefix(lines[0], "💥") || lines[1] != "FATAL EXCEPTION: mkconnect-service" || lines[3] != "connected" {
+		t.Fatalf("with a crash: %q", lines)
+	}
+	ClearLogs()
+	if got := Logs(100); got != "" {
+		t.Errorf("after Clear: %q", got)
 	}
 }

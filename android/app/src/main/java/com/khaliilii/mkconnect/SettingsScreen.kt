@@ -1,6 +1,7 @@
 package com.khaliilii.mkconnect
 
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -10,11 +11,16 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material3.Card
 import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -37,6 +43,16 @@ fun SettingsScreen(options: Options, status: Status, onMessage: (String) -> Unit
         runCatching { mkmobile.Mkmobile.setSettings(next.toJson()) }
             .onSuccess { onChanged() }
             .onFailure { onMessage(it.message ?: "invalid settings") }
+    }
+
+    var newSite by remember { mutableStateOf("") }
+    // A site is saved only once the core accepts it, so the list never shows
+    // one it refused.
+    fun saveSites(list: List<String>) {
+        val next = s.copy(testSites = list)
+        runCatching { mkmobile.Mkmobile.setSettings(next.toJson()) }
+            .onSuccess { s = next; newSite = ""; onChanged() }
+            .onFailure { onMessage(it.message ?: "invalid site") }
     }
 
     Column(
@@ -103,6 +119,29 @@ fun SettingsScreen(options: Options, status: Status, onMessage: (String) -> Unit
             "Add share links found on the clipboard when the app opens",
             s.clipboardImport,
         ) { save(s.copy(clipboardImport = it)) }
+
+        HorizontalDivider()
+        Text("Sites the server test opens", fontWeight = FontWeight.Bold)
+        Hint(
+            "\"Test all (latency, speed + sites)\" and \"Update & test\" open these through each account, " +
+                "the way a browser does, and show which of them open."
+        )
+        s.testSites.forEachIndexed { i, site ->
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(site, style = MaterialTheme.typography.bodyMedium, modifier = Modifier.weight(1f))
+                IconButton({ saveSites(s.testSites.filterIndexed { j, _ -> j != i }) }) {
+                    Icon(Icons.Filled.Delete, "Remove $site")
+                }
+            }
+        }
+        if (s.testSites.isEmpty()) {
+            Hint("No sites: the test measures only latency and speed.")
+        }
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Box(Modifier.weight(1f)) { Field("Add a site", newSite, { newSite = it }, hint = "linkedin.com") }
+            TextButton({ if (newSite.isNotBlank()) saveSites(s.testSites + newSite.trim()) }) { Text("Add") }
+        }
+        TextButton({ saveSites(s.defaultTestSites) }) { Text("Default list") }
 
         HorizontalDivider()
         Text("Advanced", fontWeight = FontWeight.Bold)

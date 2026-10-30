@@ -3,6 +3,7 @@ package gui
 import (
 	"context"
 	"fmt"
+	"slices"
 	"strings"
 	"time"
 
@@ -35,6 +36,8 @@ func (u *ui) newTestControls() (testBtn, sortBtn *widget.Button, bar *fyne.Conta
 			fyne.NewMenuItem("Test latency, speed and sites of the accounts shown", func() { u.testShown(true) }),
 			fyne.NewMenuItemSeparator(),
 			fyne.NewMenuItem("Test the selected account (with speed and sites)", u.testSelected),
+			fyne.NewMenuItemSeparator(),
+			fyne.NewMenuItem("Sites the test opens…", u.showTestSites),
 		)
 		widget.ShowPopUpMenuAtRelativePosition(menu, u.win.Canvas(), fyne.NewPos(0, testBtn.Size().Height), testBtn)
 	}
@@ -64,6 +67,64 @@ func (u *ui) newTestControls() (testBtn, sortBtn *widget.Button, bar *fyne.Conta
 	bar.Hide()
 	u.testBar = bar
 	return testBtn, sortBtn, bar
+}
+
+// showTestSites edits the sites the speed test opens through each account:
+// a row per site with a remove button, a box to add one, and the default
+// list back. Changes are saved at once.
+func (u *ui) showTestSites() {
+	rows := container.NewVBox()
+	entry := widget.NewEntry()
+	entry.SetPlaceHolder("linkedin.com, or a full address")
+	problem := widget.NewLabel("")
+	problem.Importance = widget.DangerImportance
+	problem.Hide()
+	var show func()
+	set := func(list []string) {
+		u.store.Settings.TestSites = list
+		u.save()
+		show()
+	}
+	show = func() {
+		rows.RemoveAll()
+		for i, site := range u.store.Settings.TestSites {
+			remove := widget.NewButtonWithIcon("", theme.DeleteIcon(), func() {
+				set(slices.Delete(slices.Clone(u.store.Settings.TestSites), i, i+1))
+			})
+			rows.Add(container.NewBorder(nil, nil, nil, remove, widget.NewLabel(site)))
+		}
+		if len(u.store.Settings.TestSites) == 0 {
+			rows.Add(widget.NewLabel("No sites: the test measures only latency and speed."))
+		}
+	}
+	add := func() {
+		site := strings.TrimSpace(entry.Text)
+		if _, err := profile.ParseTestSite(site); err != nil {
+			problem.SetText(err.Error())
+			problem.Show()
+			return
+		}
+		name := profile.TestSiteName(site)
+		if slices.ContainsFunc(u.store.Settings.TestSites, func(s string) bool { return profile.TestSiteName(s) == name }) {
+			problem.SetText(name + " is already in the list")
+			problem.Show()
+			return
+		}
+		problem.Hide()
+		entry.SetText("")
+		set(append(slices.Clone(u.store.Settings.TestSites), site))
+	}
+	entry.OnSubmitted = func(string) { add() }
+	addBtn := widget.NewButtonWithIcon("Add", theme.ContentAddIcon(), add)
+	defaults := widget.NewButton("Default list", func() { set(slices.Clone(profile.DefaultTestSites)) })
+	show()
+
+	intro := widget.NewLabel("The speed test opens these sites through each account, the way a browser\n" +
+		"does (the page and the scripts it needs), and shows which of them open.")
+	foot := container.NewVBox(problem, container.NewBorder(nil, nil, nil, addBtn, entry), container.NewHBox(defaults))
+	d := dialog.NewCustom("Sites the test opens", "Close", container.NewBorder(intro, foot, nil, nil, container.NewVScroll(rows)), u.win)
+	d.Resize(fyne.NewSize(480, 520))
+	d.Show()
 }
 
 // sortButtonText names the current order: "Sort: Latency".

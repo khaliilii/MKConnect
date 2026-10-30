@@ -88,6 +88,8 @@ data class Settings(
     val fakeDns: Boolean,
     val failover: Boolean,
     val blockQuic: Boolean,
+    val testSites: List<String>,
+    val defaultTestSites: List<String>,
 ) {
     fun toJson(): String = JSONObject().apply {
         put("mode", if (vpnMode) "vpn" else "proxy")
@@ -107,8 +109,12 @@ data class Settings(
         put("fake_dns", fakeDns)
         put("failover", failover)
         put("block_quic", blockQuic)
+        put("test_sites", JSONArray(testSites))
     }.toString()
 }
+
+private fun JSONObject.strings(key: String): List<String> =
+    optJSONArray(key)?.let { a -> (0 until a.length()).map { a.getString(it) } } ?: emptyList()
 
 fun loadSettings(): Settings {
     val o = JSONObject(Mkmobile.settings())
@@ -130,6 +136,8 @@ fun loadSettings(): Settings {
         fakeDns = o.optBoolean("fake_dns", true),
         failover = o.optBoolean("failover", true),
         blockQuic = o.optBoolean("block_quic", true),
+        testSites = o.strings("test_sites"),
+        defaultTestSites = o.strings("default_test_sites"),
     )
 }
 

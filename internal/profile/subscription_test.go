@@ -325,3 +325,45 @@ func TestSiteFailuresSortBehind(t *testing.T) {
 		t.Errorf("summary %q mentions sites that weren't checked", s)
 	}
 }
+
+// TestTestSites: what users type becomes a page address and a short name;
+// anything that isn't a website is refused by Validate, and an empty list
+// stays empty when saved (no site check) instead of coming back as defaults.
+func TestTestSites(t *testing.T) {
+	for in, want := range map[string]string{
+		"linkedin.com":                  "https://linkedin.com/",
+		" www.youtube.com ":             "https://www.youtube.com/",
+		"https://web.telegram.org/a/":   "https://web.telegram.org/a/",
+		"http://example.org:8080/x?y=1": "http://example.org:8080/x?y=1",
+	} {
+		if got, err := ParseTestSite(in); err != nil || got != want {
+			t.Errorf("%q: %q, %v; want %q", in, got, err, want)
+		}
+	}
+	for _, bad := range []string{"", "youtube", "ftp://x.com", "you tube.com", "https://"} {
+		if _, err := ParseTestSite(bad); err == nil {
+			t.Errorf("%q accepted", bad)
+		}
+	}
+	if n := TestSiteName("https://www.linkedin.com/feed/"); n != "linkedin.com" {
+		t.Errorf("name %q", n)
+	}
+	st := DefaultSettings()
+	st.TestSites = append(st.TestSites, "not a site")
+	if st.Validate() == nil {
+		t.Error("a bad test site passed Validate")
+	}
+
+	path := filepath.Join(t.TempDir(), "p.json")
+	s, _ := Load(path)
+	if !slices.Equal(s.Settings.TestSites, DefaultTestSites) {
+		t.Fatalf("new store: %v", s.Settings.TestSites)
+	}
+	s.Settings.TestSites = []string{}
+	if err := s.Save(); err != nil {
+		t.Fatal(err)
+	}
+	if again, _ := Load(path); len(again.Settings.TestSites) != 0 {
+		t.Errorf("an emptied list came back as %v", again.Settings.TestSites)
+	}
+}

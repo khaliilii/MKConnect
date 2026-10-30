@@ -329,6 +329,10 @@ type mobileSettings struct {
 	FakeDNS    bool `json:"fake_dns"`
 	Failover   bool `json:"failover"`
 	BlockQUIC  bool `json:"block_quic"`
+	// TestSites are the sites the server test opens through each account;
+	// DefaultTestSites (only sent to the app) is the list to go back to.
+	TestSites        []string `json:"test_sites"`
+	DefaultTestSites []string `json:"default_test_sites,omitempty"`
 }
 
 // Settings returns the phone settings as JSON.
@@ -348,7 +352,8 @@ func Settings() (string, error) {
 		ProxyUser: st.ProxyUser, ProxyPass: st.ProxyPass, RemoteDNS: st.RemoteDNS, IPv6: st.IPv6,
 		LogLevel: st.LogLevel, AutoReconnect: st.AutoReconnect, SortBy: st.SortBy,
 		TUNStack: st.TUNStack, TUNMTU: st.TUNMTU, ClipboardImport: st.ClipboardImport,
-		DirectIran: st.DirectIran, FakeDNS: st.FakeDNS, Failover: st.Failover, BlockQUIC: st.BlockQUIC})
+		DirectIran: st.DirectIran, FakeDNS: st.FakeDNS, Failover: st.Failover, BlockQUIC: st.BlockQUIC,
+		TestSites: st.TestSites, DefaultTestSites: profile.DefaultTestSites})
 	return string(data), nil
 }
 
@@ -369,6 +374,9 @@ func SetSettings(data string) error {
 	st.AutoReconnect, st.SortBy, st.ClipboardImport, st.Failover = in.AutoReconnect, in.SortBy, in.ClipboardImport, in.Failover
 	st.TUNStack, st.TUNMTU, st.DirectIran, st.FakeDNS = in.TUNStack, in.TUNMTU, in.DirectIran, in.FakeDNS
 	st.BlockQUIC = in.BlockQUIC
+	if in.TestSites != nil { // an app from before the list leaves it out
+		st.TestSites = in.TestSites
+	}
 	if in.RemoteDNS != "" {
 		st.RemoteDNS = in.RemoteDNS
 	}

@@ -2,6 +2,7 @@ package cli
 
 import (
 	"fmt"
+	"slices"
 	"strconv"
 	"strings"
 
@@ -69,6 +70,14 @@ var settingKeys = map[string]func(s *profile.Settings, v string) error{
 		s.IPv6 = b
 		return err
 	},
+	"test-sites": func(s *profile.Settings, v string) error {
+		if v == "default" {
+			s.TestSites = slices.Clone(profile.DefaultTestSites)
+			return nil
+		}
+		s.TestSites = append([]string{}, splitComma(v)...) // "" = none: the test skips the sites
+		return nil
+	},
 	"tun-stack": func(s *profile.Settings, v string) error { s.TUNStack = v; return nil },
 	"tun-mtu": func(s *profile.Settings, v string) error {
 		n, err := strconv.Atoi(v)
@@ -107,6 +116,7 @@ func newSettingsCmd() *cobra.Command {
 			fmt.Printf("direct-iran:   %t\n", s.DirectIran)
 			fmt.Printf("fake-dns:      %t\n", s.FakeDNS)
 			fmt.Printf("block-quic:    %t\n", s.BlockQUIC)
+			fmt.Printf("test-sites:    %s\n", strings.Join(s.TestSites, ","))
 			if s.TUNStack != "" || s.TUNMTU > 0 {
 				fmt.Printf("tun-stack:     %s\ntun-mtu:       %d\n", s.TUNStack, s.TUNMTU)
 			}
@@ -115,10 +125,11 @@ func newSettingsCmd() *cobra.Command {
 	}
 	set := &cobra.Command{
 		Use:   "set <key> <value>",
-		Short: "Change a setting (core, mode, external-path, external-kind, port, lan, proxy-user, proxy-pass, remote-dns, log-level, share, auto-reconnect, failover, mux, direct-iran, fake-dns, block-quic, ipv6, tun-stack, tun-mtu)",
+		Short: "Change a setting (core, mode, external-path, external-kind, port, lan, proxy-user, proxy-pass, remote-dns, log-level, share, auto-reconnect, failover, mux, direct-iran, fake-dns, block-quic, test-sites, ipv6, tun-stack, tun-mtu)",
 		Example: `  mkconnect settings set core xray
   mkconnect settings set mode tun
   mkconnect settings set lan true
+  mkconnect settings set test-sites youtube.com,instagram.com,linkedin.com   (or "default", or "" for none)
   mkconnect settings set proxy-user me && mkconnect settings set proxy-pass secret`,
 		Args: cobra.ExactArgs(2),
 		RunE: func(cmd *cobra.Command, args []string) error {

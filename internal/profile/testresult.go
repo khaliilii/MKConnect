@@ -29,10 +29,10 @@ type TestResult struct {
 // SiteResult is how a website opened through the server in the site check.
 type SiteResult struct {
 	Name  string `json:"name"`
-	OK    bool   `json:"ok"`             // the page and all its parts arrived
+	OK    bool   `json:"ok"`             // the page and all its parts arrived (in one of two tries)
 	Ms    int    `json:"ms,omitzero"`    // how long that took
 	Parts int    `json:"parts"`          // connections the page needed
-	Stuck int    `json:"stuck,omitzero"` // of them, those that froze or failed
+	Stuck int    `json:"stuck,omitzero"` // those that froze or failed, over both tries
 }
 
 // FailedSites names the sites that didn't open.

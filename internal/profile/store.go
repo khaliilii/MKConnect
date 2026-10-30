@@ -4,8 +4,10 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net/url"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 )
 
@@ -85,6 +87,11 @@ type Settings struct {
 	// which these tunnels carry far better. On by default.
 	BlockQUIC bool `json:"block_quic"`
 
+	// TestSites are the websites the account test opens through each
+	// account (see engine.Test), as the user typed them: "linkedin.com" or a
+	// full address. Empty skips the site check.
+	TestSites []string `json:"test_sites"`
+
 	// Version is the settings layout the file was written with; Load uses
 	// it to apply changed defaults once (see migrate).
 	Version int `json:"settings_version,omitempty"`
@@ -119,6 +126,7 @@ func DefaultSettings() Settings {
 		Failover:        true,
 		BlockQUIC:       true,
 		FakeDNS:         true,
+		TestSites:       slices.Clone(DefaultTestSites),
 		Version:         settingsVersion,
 	}
 }
@@ -134,6 +142,39 @@ func (s *Settings) migrate() {
 		s.FakeDNS = true
 	}
 	s.Version = settingsVersion
+}
+
+// DefaultTestSites are the sites the account test opens on a new install,
+// and when the list is reset.
+var DefaultTestSites = []string{"www.youtube.com", "www.instagram.com", "web.telegram.org/a/", "www.facebook.com",
+	"x.com", "www.clubhouse.com", "www.linkedin.com"}
+
+// ParseTestSite turns a test site as typed ("linkedin.com",
+// "https://www.linkedin.com/feed/") into the address of the page to open.
+func ParseTestSite(site string) (string, error) {
+	site = strings.TrimSpace(site)
+	if !strings.Contains(site, "://") {
+		site = "https://" + site
+	}
+	u, err := url.Parse(site)
+	if err != nil || u.Scheme != "https" && u.Scheme != "http" || !strings.Contains(u.Hostname(), ".") ||
+		strings.ContainsAny(u.Host, " \t") {
+		return "", fmt.Errorf("%q is not a website (like youtube.com)", strings.TrimPrefix(site, "https://"))
+	}
+	if u.Path == "" {
+		u.Path = "/"
+	}
+	return u.String(), nil
+}
+
+// TestSiteName is how results name a test site: its host without "www.".
+func TestSiteName(site string) string {
+	page, err := ParseTestSite(site)
+	if err != nil {
+		return site
+	}
+	u, _ := url.Parse(page)
+	return strings.TrimPrefix(u.Hostname(), "www.")
 }
 
 // ListenAddress returns the IP the local proxy binds to.
@@ -171,6 +212,17 @@ func (s *Settings) Validate() error {
 	}
 	if s.TUNMTU != 0 && (s.TUNMTU < 576 || s.TUNMTU > 65535) {
 		return fmt.Errorf("tun_mtu %d out of range", s.TUNMTU)
+	}
+	seen := map[string]bool{}
+	for _, site := range s.TestSites {
+		if _, err := ParseTestSite(site); err != nil {
+			return fmt.Errorf("test site: %w", err)
+		}
+		name := TestSiteName(site)
+		if seen[name] {
+			return fmt.Errorf("test site %s is listed twice", name)
+		}
+		seen[name] = true
 	}
 	return nil
 }

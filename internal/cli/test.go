@@ -25,8 +25,9 @@ func newTestCmd() *cobra.Command {
 		Short: "Measure latency, quality and speed of accounts (default: all)",
 		Long: `Starts each account on a private local port and measures it through the proxy:
 latency (average of 3 HTTPS requests, each on a new connection), how many of
-them succeeded, and with --speed the download speed. Results are saved and
-shown by "profile list" and the app.`,
+them succeeded, and with --speed the download speed and which of the test
+sites (settings set test-sites) open through it. Results are saved and shown
+by "profile list" and the app.`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			store, err := loadStore()
 			if err != nil {
@@ -109,7 +110,7 @@ shown by "profile list" and the app.`,
 		},
 	}
 	cmd.Flags().StringVar(&group, "group", "", "only test this group")
-	cmd.Flags().BoolVar(&speed, "speed", false, "also measure download speed and open YouTube, Instagram, Telegram, Facebook and X (uses some traffic)")
+	cmd.Flags().BoolVar(&speed, "speed", false, "also measure download speed and open the test sites (settings set test-sites; uses some traffic)")
 	cmd.Flags().IntVar(&parallel, "parallel", 8, "accounts tested at the same time")
 	cmd.Flags().StringVar(&sortBy, "sort", "", "sort the table: latency or speed")
 	return cmd

@@ -51,13 +51,16 @@ A multi-account client for **SSH, VMess, VLESS, Trojan, Shadowsocks, Hysteria2 a
 - **Update & test**: one click updates the subscriptions (the one shown, or all), measures latency and download
   speed of every account shown (at most 4 s of download each, to spare the data quota) and sorts the list by
   speed, fastest first; subscription messages such as "Used: 47 GB" are skipped. The phone app has the same button.
-  The speed pass also runs a **site check**: YouTube, Instagram, Telegram (web), Facebook and X are opened at once
-  the way a browser opens them (the page, the hosts it loads from, then the first scripts and styles it names,
-  each on a new connection; about 35 connections and 4 MB per account). Each account shows "5/5 sites", or
-  "3/5 sites" with the ones that didn't open named in its row ("YouTube, Telegram failed"), and accounts on which
-  sites fail sort behind those on which they all open: on some networks a server answers probes quickly and
-  downloads fast over one connection, yet a share of new connections freezes at the start, and pages that need
-  dozens of them never finish loading (seen on Iranian Wi-Fi with accounts meant for Irancell)
+  The speed pass also runs a **site check**: the sites of a list you can edit (**Test → Sites the test opens…**
+  on the desktop, Settings on the phone, `mkconnect settings set test-sites` on the command line; by default
+  YouTube, Instagram, Telegram Web, Facebook, X, Clubhouse and LinkedIn) are opened the way a browser opens them:
+  the page, the hosts it loads from, then the first scripts and styles it names, each on a new connection, four
+  sites at a time (about 7 s and a few MB per account for the default list). A site that doesn't open gets a
+  second try. Each account shows "7/7 sites", or "5/7 sites" with the ones that didn't open named in its row
+  ("youtube.com, x.com failed"), and accounts on which sites fail sort behind those on which they all open: on
+  some networks a server answers probes quickly and downloads fast over one connection, yet a share of new
+  connections freezes at the start, and pages that need dozens of them never finish loading (seen on Iranian
+  Wi-Fi with accounts meant for Irancell)
 - core, mode (Proxy / TUN), local port, LAN sharing and proxy password, all saved as you change them
 - one-click connect / disconnect; selecting another account while connected switches to it
 - live connection info: inbound, outbound, core, upload / download speed and totals
@@ -150,6 +153,7 @@ mkconnect settings set direct-iran false            # Iranian sites through the 
 mkconnect settings set mux true                     # many connections over one (Xray Mux.Cool)
 mkconnect settings set fake-dns false               # TUN: real DNS lookups through the tunnel instead of FakeIP
 mkconnect settings set block-quic false             # TUN: let QUIC (HTTP/3) through the tunnel
+mkconnect settings set test-sites youtube.com,linkedin.com   # sites the speed test opens ("default", or "" for none)
 
 # external core
 mkconnect settings set external-path /usr/local/bin/sing-box

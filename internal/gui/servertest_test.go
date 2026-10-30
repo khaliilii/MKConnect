@@ -9,6 +9,9 @@ import (
 	"strings"
 	"testing"
 
+	"fyne.io/fyne/v2"
+	"fyne.io/fyne/v2/container"
+	"fyne.io/fyne/v2/test"
 	"fyne.io/fyne/v2/widget"
 
 	"github.com/khaliilii/MKConnect/internal/engine"
@@ -186,4 +189,84 @@ func TestSiteResultsInRow(t *testing.T) {
 	if siteFailures(r) != "" || siteFailures(nil) != "" {
 		t.Error("a row names failed sites when none failed")
 	}
+}
+
+// TestEditTestSites drives the site list editor: add a site (Enter or the
+// button), refuse one that isn't a website or is already listed, remove one,
+// and bring the default list back; every change is saved.
+func TestEditTestSites(t *testing.T) {
+	u := newTestUI(t)
+	u.showTestSites()
+	var entry *widget.Entry
+	buttons := map[string]*widget.Button{}
+	var removes []*widget.Button
+	var problem *widget.Label
+	find := func() {
+		entry, removes, problem = nil, nil, nil
+		var walk func(o fyne.CanvasObject)
+		walk = func(o fyne.CanvasObject) {
+			switch w := o.(type) {
+			case *widget.Entry:
+				entry = w
+			case *widget.Button:
+				if w.Text == "" {
+					removes = append(removes, w)
+				} else {
+					buttons[w.Text] = w
+				}
+			case *widget.Label:
+				if w.Importance == widget.DangerImportance {
+					problem = w
+				}
+			case *fyne.Container:
+				for _, c := range w.Objects {
+					walk(c)
+				}
+			case *container.Scroll:
+				walk(w.Content)
+			default:
+				if wd, ok := o.(fyne.Widget); ok {
+					for _, c := range test.WidgetRenderer(wd).Objects() {
+						walk(c)
+					}
+				}
+			}
+		}
+		walk(u.win.Canvas().Overlays().Top())
+	}
+	saved := func() []string {
+		s, err := profile.Load(u.store.Path())
+		if err != nil {
+			t.Fatal(err)
+		}
+		return s.Settings.TestSites
+	}
+	find()
+	if entry == nil || len(removes) != len(profile.DefaultTestSites) || buttons["Add"] == nil || buttons["Default list"] == nil {
+		t.Fatalf("editor: entry %v, %d remove buttons, buttons %v", entry != nil, len(removes), buttons)
+	}
+
+	test.Type(entry, "example.org")
+	entry.TypedKey(&fyne.KeyEvent{Name: fyne.KeyReturn})
+	if got := saved(); got[len(got)-1] != "example.org" {
+		t.Fatalf("after adding: %v", got)
+	}
+	for _, bad := range []string{"not a site", "https://www.example.org/"} {
+		entry.SetText(bad)
+		test.Tap(buttons["Add"])
+		if find(); problem == nil || !problem.Visible() || len(saved()) != len(profile.DefaultTestSites)+1 {
+			t.Errorf("%q was added, or not explained", bad)
+		}
+	}
+
+	find()
+	test.Tap(removes[0]) // www.youtube.com
+	if got := saved(); slices.Contains(got, "www.youtube.com") || len(got) != len(profile.DefaultTestSites) {
+		t.Fatalf("after removing: %v", got)
+	}
+	test.Tap(buttons["Default list"])
+	if got := saved(); !slices.Equal(got, profile.DefaultTestSites) {
+		t.Fatalf("after the default list: %v", got)
+	}
+	screenshot(t, u.win, "test-sites")
 }

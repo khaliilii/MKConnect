@@ -22,8 +22,8 @@ type TestOptions struct {
 	Timeout   time.Duration // per probe (default 6s)
 	Speed     bool          // also measure download speed
 	SpeedTime time.Duration // speed test duration cap (default 6s)
-	// Sites also opens Sites through the server with the speed test (see
-	// siteCheck); it needs Speed.
+	// Sites also opens the settings' TestSites through the server with the
+	// speed test (see siteCheck); it needs Speed.
 	Sites bool
 }
 
@@ -191,8 +191,8 @@ func Test(ctx context.Context, p profile.Profile, s profile.Settings, o TestOpti
 		if err != nil && r.Speed == 0 {
 			r.Error = "speed: " + shortError(err)
 		}
-		if o.Sites {
-			if r.Sites = siteCheck(ctx, port); ctx.Err() != nil {
+		if sites := sitesFor(s.TestSites); o.Sites && len(sites) > 0 {
+			if r.Sites = siteCheck(ctx, port, sites); ctx.Err() != nil {
 				r.Sites = nil // cancelled: the sites didn't fail
 			}
 		}

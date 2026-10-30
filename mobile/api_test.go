@@ -162,6 +162,35 @@ func TestSettingsRoundTripAndOptions(t *testing.T) {
 		}
 	}
 
+	// The test sites: the list and the defaults come to the app, an edited
+	// list is stored, a bad site is refused, and an app that doesn't send the
+	// list leaves it alone.
+	if d, _ := s["default_test_sites"].([]any); len(d) == 0 || len(s["test_sites"].([]any)) != len(d) {
+		t.Fatalf("test sites %v, defaults %v", s["test_sites"], s["default_test_sites"])
+	}
+	s["test_sites"] = []string{"youtube.com", "linkedin.com"}
+	changed, _ = json.Marshal(s)
+	if err := SetSettings(string(changed)); err != nil {
+		t.Fatal(err)
+	}
+	for _, bad := range [][]string{{"youtube.com", "not a site"}, {"youtube.com", "https://www.youtube.com/"}} {
+		s["test_sites"] = bad
+		changed, _ = json.Marshal(s)
+		if err := SetSettings(string(changed)); err == nil {
+			t.Errorf("%v was accepted", bad)
+		}
+	}
+	delete(s, "test_sites")
+	changed, _ = json.Marshal(s)
+	if err := SetSettings(string(changed)); err != nil {
+		t.Fatal(err)
+	}
+	again, _ = Settings()
+	json.Unmarshal([]byte(again), &s)
+	if got := s["test_sites"].([]any); len(got) != 2 || got[1] != "linkedin.com" {
+		t.Errorf("test sites %v, want youtube.com, linkedin.com", got)
+	}
+
 	// Invalid settings are refused, not stored.
 	s["tun_mtu"] = 10.0
 	bad, _ := json.Marshal(s)

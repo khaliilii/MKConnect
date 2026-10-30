@@ -182,6 +182,26 @@ data class Status(val state: String, val profile: String, val error: String, val
     }
 
     val warning: Boolean get() = state == "error" || (state == "connected" && health.isNotEmpty()) || state == "reconnecting"
+
+    /** The connect bar's first line: the state in a word or two. */
+    fun headline(): String = when {
+        state == "connected" && health.isNotEmpty() -> "Connected, no internet"
+        state == "connected" -> if (healthMs > 0) "Connected · $healthMs ms" else "Connected"
+        state == "connecting" -> "Connecting…"
+        state == "reconnecting" -> "Reconnecting…"
+        state == "error" -> "Couldn't connect"
+        else -> "Disconnected"
+    }
+
+    /** The connect bar's second line: which account, and what went wrong or how much went through. */
+    fun detail(selected: String): String = when {
+        state == "connected" && health.isNotEmpty() -> "$profile: $health"
+        state == "connected" -> "$profile · ↑ $upText ↓ $downText"
+        state == "connecting" || state == "reconnecting" -> if (error.isNotEmpty()) "$profile: $error" else profile
+        state == "error" -> error
+        selected.isNotEmpty() -> selected
+        else -> "Pick an account in the list"
+    }
 }
 
 fun loadStatus(): Status {
@@ -204,6 +224,15 @@ fun loadStatus(): Status {
 // ---------- server test ----------
 
 data class TestRun(val running: Boolean, val done: Int, val total: Int, val results: Map<String, String>)
+
+/** How a measurement reads: "failed", one with sites that didn't open, or fine. */
+enum class Measured { FAILED, PARTLY, OK }
+
+fun measuredOf(summary: String): Measured = when {
+    summary.isEmpty() || summary.startsWith("failed") -> Measured.FAILED
+    summary.endsWith(" failed") -> Measured.PARTLY // "… · 5/7 sites · youtube.com, x.com failed"
+    else -> Measured.OK
+}
 
 fun loadTestRun(): TestRun {
     val o = JSONObject(Mkmobile.testProgress())

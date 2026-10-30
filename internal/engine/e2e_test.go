@@ -11,6 +11,7 @@ import (
 	"crypto/x509/pkix"
 	"encoding/json"
 	"encoding/pem"
+	"fmt"
 	"math/big"
 	"net"
 	"strings"
@@ -294,5 +295,59 @@ func TestLANSharing(t *testing.T) {
 	}
 	if _, err := tryThroughSOCKSAt(lanIP, s.ListenPort, "friend", "wrong", url); err == nil {
 		t.Fatal("wrong proxy password accepted")
+	}
+}
+
+// TestStartMobileUsesTheDesktopCore: the phone connects with the core the
+// desktop and the server test pick. A WebSocket account (a CDN front) runs on
+// Xray, a plain Shadowsocks one on sing-box, and both carry traffic and count
+// it; closing stops the proxy.
+func TestStartMobileUsesTheDesktopCore(t *testing.T) {
+	if startXray == nil {
+		t.Skip("xray not compiled in")
+	}
+	wsPort, ssPort := freePort(t), freePort(t)
+	startProtocolServer(t, []obj{
+		{"type": "vless", "tag": "ws", "listen": "127.0.0.1", "listen_port": wsPort, "users": []obj{{"uuid": testUUID}},
+			"transport": obj{"type": "ws", "path": "/ray"}},
+		{"type": "shadowsocks", "tag": "ss", "listen": "127.0.0.1", "listen_port": ssPort, "method": "aes-256-gcm", "password": "pw"},
+	})
+	target := newTarget(t)
+	url := strings.Replace(target.URL, "127.0.0.1", "localhost", 1)
+
+	for _, c := range []struct {
+		profile profile.Profile
+		core    string
+	}{
+		{profile.Profile{Name: "ws", Type: profile.TypeVLESS, Server: "127.0.0.1", Port: wsPort, UUID: testUUID,
+			Transport: profile.Transport{Network: "ws", Path: "/ray"}}, profile.CoreXray},
+		{profile.Profile{Name: "ss", Type: profile.TypeShadowsocks, Server: "127.0.0.1", Port: ssPort,
+			Method: "aes-256-gcm", Password: "pw"}, profile.CoreSingBox},
+	} {
+		t.Run(c.profile.Name, func(t *testing.T) {
+			s := testSettings(t)
+			s.Core = profile.CoreXray // the phone's stored core doesn't matter
+			e, core, err := StartMobile(c.profile, s, false, "", nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if core != c.core {
+				t.Errorf("core %s, want %s", core, c.core)
+			}
+			waitListening(t, s.ListenPort)
+			if body := getThroughSOCKS(t, s.ListenPort, "", "", url); body != "hello through tunnel" {
+				t.Fatalf("unexpected body %q", body)
+			}
+			if _, down := e.(trafficCounter).Traffic(); down == 0 {
+				t.Error("download not counted")
+			}
+			if err := e.Close(); err != nil {
+				t.Fatal(err)
+			}
+			if c, err := net.DialTimeout("tcp", fmt.Sprintf("127.0.0.1:%d", s.ListenPort), time.Second); err == nil {
+				c.Close()
+				t.Error("the proxy still listens after Close")
+			}
+		})
 	}
 }

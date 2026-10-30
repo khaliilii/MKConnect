@@ -4,7 +4,6 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
@@ -103,125 +102,114 @@ fun EditorDialog(id: String, options: Options, onClose: () -> Unit, onSaved: (St
     val network = get("transport.network").ifEmpty { "tcp" }
     val tlsMode = get("tls.mode")
 
-    AlertDialog(
-        onDismissRequest = onClose,
-        title = { Text(if (id.isEmpty()) "New account" else "Edit account") },
-        text = {
-            Column(
-                Modifier.fillMaxWidth().heightIn(max = 520.dp).verticalScroll(rememberScrollState()),
-                verticalArrangement = Arrangement.spacedBy(10.dp),
-            ) {
-                if (error.isNotEmpty()) {
-                    Text(error, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodyMedium)
-                }
-                Picker("Protocol", options.types, type) { set("type", it) }
-                Field("Name", get("name"), { set("name", it) }, hint = "shown in the list")
-                Field("Server", get("server"), { set("server", it) }, hint = "host name or IP")
-                Field("Port", get("port"), { set("port", it) }, number = true)
+    fun save() {
+        val payload = applyForm(JSONObject(json.toString()), form.toMap()).toString()
+        runCatching { Mkmobile.saveProfile(payload) }
+            .onSuccess {
+                onSaved(if (id.isEmpty()) "Account added." else "Account saved.")
+                onClose()
+            }
+            .onFailure { error = it.message ?: "invalid account" }
+    }
 
-                when (type) {
-                    "ssh" -> {
-                        SectionTitle("SSH")
-                        Field("Username", get("user"), { set("user", it) }, hint = "root")
-                        Field("Password", get("password"), { set("password", it) }, password = true)
-                        Field("Private key file", get("private_key_path"), { set("private_key_path", it) }, hint = "optional path on the phone")
-                        if (get("host_key").isNotEmpty()) {
-                            Hint("A host key is pinned for this server; changing the server clears it.")
-                        }
-                        Field("UDPGW port", get("udpgw_port"), { set("udpgw_port", it) }, hint = "e.g. 7300, empty = no UDP", number = true)
-                        SwitchRow("UDPGW transparent DNS (uses the server's resolver)", flag("udpgw_dns")) { set("udpgw_dns", it.toString()) }
-                        SectionTitle("Payload (HTTP Injector style)")
-                        Field(
-                            "Payload", get("payload"), { set("payload", it) },
-                            hint = "GET / HTTP/1.1[crlf]Host: bug.example[crlf][crlf]", lines = 3,
-                        )
-                        Hint("Sent before the SSH handshake. Tags: " + options.payloadTags.joinToString(" "))
-                        Field("Payload proxy", get("payload_proxy"), { set("payload_proxy", it) }, hint = "host:port, optional")
-                    }
-                    "vmess", "vless" -> {
-                        SectionTitle(type.uppercase())
-                        Field("UUID", get("uuid"), { set("uuid", it) }, hint = "xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx")
-                        if (type == "vmess") {
-                            Picker("Cipher", options.vmessCiphers, get("security").ifEmpty { "auto" }) { set("security", it) }
-                            Field("alterId", get("alter_id"), { set("alter_id", it) }, number = true)
-                        } else {
-                            Picker("Flow", options.flows, get("flow")) { set("flow", it) }
-                        }
-                    }
-                    "trojan" -> {
-                        SectionTitle("Trojan")
-                        Field("Password", get("password"), { set("password", it) }, password = true)
-                    }
-                    "shadowsocks" -> {
-                        SectionTitle("Shadowsocks")
-                        Picker("Method", options.ssMethods, get("method").ifEmpty { options.ssMethods.firstOrNull() ?: "" }) { set("method", it) }
-                        Field("Password", get("password"), { set("password", it) }, password = true)
-                    }
-                    "hysteria2" -> {
-                        SectionTitle("Hysteria2")
-                        Field("Password", get("password"), { set("password", it) }, password = true)
-                        Field("Obfuscation password", get("obfs_password"), { set("obfs_password", it) }, hint = "salamander, optional")
-                        Field("Up Mbps", get("up_mbps"), { set("up_mbps", it) }, number = true)
-                        Field("Down Mbps", get("down_mbps"), { set("down_mbps", it) }, number = true)
-                    }
-                    "tuic" -> {
-                        SectionTitle("TUIC")
-                        Field("UUID", get("uuid"), { set("uuid", it) })
-                        Field("Password", get("password"), { set("password", it) }, password = true)
-                        Picker("Congestion control", options.congestionControls, get("congestion_control").ifEmpty { "bbr" }) { set("congestion_control", it) }
-                        Picker("UDP relay mode", options.udpRelayModes, get("udp_relay_mode").ifEmpty { "native" }) { set("udp_relay_mode", it) }
-                    }
-                }
+    FullScreenDialog(if (id.isEmpty()) "New account" else "Edit account", "Save", ::save, onClose) {
+        if (error.isNotEmpty()) {
+            Text(error, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodyMedium)
+        }
+        Picker("Protocol", options.types, type) { set("type", it) }
+        Field("Name", get("name"), { set("name", it) }, hint = "shown in the list")
+        Field("Server", get("server"), { set("server", it) }, hint = "host name or IP")
+        Field("Port", get("port"), { set("port", it) }, number = true)
 
-                if (type == "vmess" || type == "vless" || type == "trojan" || type == "shadowsocks") {
-                    HorizontalDivider()
-                    SectionTitle("Transport")
-                    Picker("Network", options.networks, network) { set("transport.network", it) }
-                    when (network) {
-                        "tcp" -> Picker("TCP header", options.headerTypes, get("transport.header_type")) { set("transport.header_type", it) }
-                        "grpc" -> Field("gRPC service name", get("transport.service_name"), { set("transport.service_name", it) })
-                        else -> {
-                            Field("Path", get("transport.path"), { set("transport.path", it) }, hint = "/")
-                            Field("Host header", get("transport.host"), { set("transport.host", it) })
-                        }
-                    }
+        when (type) {
+            "ssh" -> {
+                SectionTitle("SSH")
+                Field("Username", get("user"), { set("user", it) }, hint = "root")
+                Field("Password", get("password"), { set("password", it) }, password = true)
+                Field("Private key file", get("private_key_path"), { set("private_key_path", it) }, hint = "optional path on the phone")
+                if (get("host_key").isNotEmpty()) {
+                    Hint("A host key is pinned for this server; changing the server clears it.")
                 }
-
-                if (type != "ssh") {
-                    HorizontalDivider()
-                    SectionTitle("TLS")
-                    Picker("Security", options.tlsModes, tlsMode) { set("tls.mode", it) }
-                    if (tlsMode.isNotEmpty()) {
-                        Field("SNI", get("tls.sni"), { set("tls.sni", it) })
-                        Picker("Fingerprint (uTLS)", options.fingerprints, get("tls.fingerprint")) { set("tls.fingerprint", it) }
-                        if (tlsMode == "reality") {
-                            Field("REALITY public key", get("tls.reality_public_key"), { set("tls.reality_public_key", it) })
-                            Field("REALITY short id", get("tls.reality_short_id"), { set("tls.reality_short_id", it) })
-                        } else {
-                            SwitchRow("Skip certificate verification (insecure)", flag("tls.insecure")) { set("tls.insecure", it.toString()) }
-                        }
-                    }
+                Field("UDPGW port", get("udpgw_port"), { set("udpgw_port", it) }, hint = "e.g. 7300, empty = no UDP", number = true)
+                SwitchRow("UDPGW transparent DNS (uses the server's resolver)", flag("udpgw_dns")) { set("udpgw_dns", it.toString()) }
+                SectionTitle("Payload (HTTP Injector style)")
+                Field(
+                    "Payload", get("payload"), { set("payload", it) },
+                    hint = "GET / HTTP/1.1[crlf]Host: bug.example[crlf][crlf]", lines = 3,
+                )
+                Hint("Sent before the SSH handshake. Tags: " + options.payloadTags.joinToString(" "))
+                Field("Payload proxy", get("payload_proxy"), { set("payload_proxy", it) }, hint = "host:port, optional")
+            }
+            "vmess", "vless" -> {
+                SectionTitle(type.uppercase())
+                Field("UUID", get("uuid"), { set("uuid", it) }, hint = "xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx")
+                if (type == "vmess") {
+                    Picker("Cipher", options.vmessCiphers, get("security").ifEmpty { "auto" }) { set("security", it) }
+                    Field("alterId", get("alter_id"), { set("alter_id", it) }, number = true)
+                } else {
+                    Picker("Flow", options.flows, get("flow")) { set("flow", it) }
                 }
             }
-        },
-        confirmButton = {
-            TextButton({
-                val payload = applyForm(JSONObject(json.toString()), form.toMap()).toString()
-                runCatching { Mkmobile.saveProfile(payload) }
-                    .onSuccess {
-                        onSaved(if (id.isEmpty()) "Account added." else "Account saved.")
-                        onClose()
-                    }
-                    .onFailure { error = it.message ?: "invalid account" }
-            }) { Text("Save") }
-        },
-        dismissButton = { TextButton(onClose) { Text("Cancel") } },
-    )
+            "trojan" -> {
+                SectionTitle("Trojan")
+                Field("Password", get("password"), { set("password", it) }, password = true)
+            }
+            "shadowsocks" -> {
+                SectionTitle("Shadowsocks")
+                Picker("Method", options.ssMethods, get("method").ifEmpty { options.ssMethods.firstOrNull() ?: "" }) { set("method", it) }
+                Field("Password", get("password"), { set("password", it) }, password = true)
+            }
+            "hysteria2" -> {
+                SectionTitle("Hysteria2")
+                Field("Password", get("password"), { set("password", it) }, password = true)
+                Field("Obfuscation password", get("obfs_password"), { set("obfs_password", it) }, hint = "salamander, optional")
+                Field("Up Mbps", get("up_mbps"), { set("up_mbps", it) }, number = true)
+                Field("Down Mbps", get("down_mbps"), { set("down_mbps", it) }, number = true)
+            }
+            "tuic" -> {
+                SectionTitle("TUIC")
+                Field("UUID", get("uuid"), { set("uuid", it) })
+                Field("Password", get("password"), { set("password", it) }, password = true)
+                Picker("Congestion control", options.congestionControls, get("congestion_control").ifEmpty { "bbr" }) { set("congestion_control", it) }
+                Picker("UDP relay mode", options.udpRelayModes, get("udp_relay_mode").ifEmpty { "native" }) { set("udp_relay_mode", it) }
+            }
+        }
+
+        if (type == "vmess" || type == "vless" || type == "trojan" || type == "shadowsocks") {
+            HorizontalDivider()
+            SectionTitle("Transport")
+            Picker("Network", options.networks, network) { set("transport.network", it) }
+            when (network) {
+                "tcp" -> Picker("TCP header", options.headerTypes, get("transport.header_type")) { set("transport.header_type", it) }
+                "grpc" -> Field("gRPC service name", get("transport.service_name"), { set("transport.service_name", it) })
+                else -> {
+                    Field("Path", get("transport.path"), { set("transport.path", it) }, hint = "/")
+                    Field("Host header", get("transport.host"), { set("transport.host", it) })
+                }
+            }
+        }
+
+        if (type != "ssh") {
+            HorizontalDivider()
+            SectionTitle("TLS")
+            Picker("Security", options.tlsModes, tlsMode) { set("tls.mode", it) }
+            if (tlsMode.isNotEmpty()) {
+                Field("SNI", get("tls.sni"), { set("tls.sni", it) })
+                Picker("Fingerprint (uTLS)", options.fingerprints, get("tls.fingerprint")) { set("tls.fingerprint", it) }
+                if (tlsMode == "reality") {
+                    Field("REALITY public key", get("tls.reality_public_key"), { set("tls.reality_public_key", it) })
+                    Field("REALITY short id", get("tls.reality_short_id"), { set("tls.reality_short_id", it) })
+                } else {
+                    SwitchRow("Skip certificate verification (insecure)", flag("tls.insecure")) { set("tls.insecure", it.toString()) }
+                }
+            }
+        }
+    }
 }
 
 /** ImportDialog takes links or a subscription URL, optionally into a group. */
 @Composable
-fun ImportDialog(onClose: () -> Unit, onImport: (String, String) -> Unit) {
+fun ImportDialog(onClose: () -> Unit, onNewAccount: () -> Unit, onImport: (String, String) -> Unit) {
     var text by remember { mutableStateOf("") }
     var group by remember { mutableStateOf("") }
     AlertDialog(
@@ -236,9 +224,10 @@ fun ImportDialog(onClose: () -> Unit, onImport: (String, String) -> Unit) {
                 )
                 Field("Group (optional)", group, { group = it }, hint = "new or existing group name")
                 Hint("Several links at once are fine, in any surrounding text or base64; duplicates are skipped.")
+                TextButton(onNewAccount) { Text("Add an account by hand instead") }
             }
         },
-        confirmButton = { TextButton({ onImport(text, group); onClose() }) { Text("Import") } },
+        confirmButton = { TextButton({ onImport(text, group); onClose() }, enabled = text.isNotBlank()) { Text("Import") } },
         dismissButton = { TextButton(onClose) { Text("Cancel") } },
     )
 }
@@ -251,7 +240,7 @@ fun PromptDialog(title: String, label: String, initial: String, onClose: () -> U
         onDismissRequest = onClose,
         title = { Text(title) },
         text = { Field(label, text, { text = it }) },
-        confirmButton = { TextButton({ onDone(text); onClose() }) { Text("OK") } },
+        confirmButton = { TextButton({ onDone(text.trim()); onClose() }, enabled = text.isNotBlank()) { Text("OK") } },
         dismissButton = { TextButton(onClose) { Text("Cancel") } },
     )
 }

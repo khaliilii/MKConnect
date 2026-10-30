@@ -1,7 +1,6 @@
 package com.khaliilii.mkconnect
 
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -14,11 +13,12 @@ import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.VerticalAlignBottom
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.IconToggleButton
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -66,13 +66,17 @@ fun LogsScreen() {
 
     Column(Modifier.fillMaxSize()) {
         Row(
-            Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 4.dp),
-            horizontalArrangement = Arrangement.spacedBy(4.dp),
+            Modifier.fillMaxWidth().padding(start = 12.dp, end = 4.dp, top = 4.dp, bottom = 4.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            Box(Modifier.weight(1f)) { Field("", filter, { filter = it }, hint = "Filter") }
-            Text("Follow", style = MaterialTheme.typography.labelMedium)
-            Switch(follow, { follow = it })
+            SearchField(filter, { filter = it }, "Filter", Modifier.weight(1f))
+            IconToggleButton(follow, { follow = it }) {
+                Icon(
+                    Icons.Filled.VerticalAlignBottom,
+                    if (follow) "Following new lines (tap to stop)" else "Follow new lines",
+                    tint = if (follow) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
             IconButton(onClick = { clipboard.setText(AnnotatedString(lines.joinToString("\n"))) }) {
                 Icon(Icons.Filled.ContentCopy, "Copy all")
             }

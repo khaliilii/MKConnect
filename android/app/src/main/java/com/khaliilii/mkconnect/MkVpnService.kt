@@ -19,6 +19,7 @@ import mkmobile.TunConfig
 import org.json.JSONArray
 import org.json.JSONObject
 import java.net.NetworkInterface
+import java.util.concurrent.Executors
 import kotlin.concurrent.thread
 
 /**
@@ -26,90 +27,123 @@ import kotlin.concurrent.thread
  * in the background). Implements [Platform] for the core: it builds the TUN,
  * protects the core's own sockets (VpnService.protect has the same signature)
  * and reports the network interfaces Android won't let the core read itself.
+ *
+ * Connect, disconnect and switch commands run one at a time on [worker], in
+ * the order they arrive, so a disconnect followed at once by a connect (picking
+ * another account) can't end the new connection.
  */
 class MkVpnService : VpnService(), Platform {
 
+    private val worker = Executors.newSingleThreadExecutor { Thread(it, "mkconnect-service") }
     private var tun: ParcelFileDescriptor? = null
     private var networkCallback: ConnectivityManager.NetworkCallback? = null
 
+    /** Counts connections; a status watcher of an older one stops. */
+    @Volatile
+    private var generation = 0
+
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        // Restarted by the system (no intent) or by always-on VPN: connect as a VPN.
+        val vpn = intent?.getBooleanExtra(EXTRA_VPN, true) ?: true
         when (intent?.action) {
-            ACTION_STOP -> {
-                stop()
-                return START_NOT_STICKY
+            ACTION_STOP -> worker.execute {
+                disconnect()
+                stopSelfResult(startId) // only if no newer command came in
             }
-            else -> start(intent?.getBooleanExtra(EXTRA_VPN, true) ?: true)
+            ACTION_SWITCH -> {
+                goForeground("Switching account…")
+                worker.execute {
+                    disconnect()
+                    connect(vpn, startId)
+                }
+            }
+            else -> {
+                goForeground("Connecting…")
+                worker.execute { connect(vpn, startId) }
+            }
         }
         return START_STICKY
     }
 
-    private fun start(vpn: Boolean) {
-        val notification = notification("Connecting…")
+    private fun goForeground(text: String) {
+        val notification = notification(text)
         if (Build.VERSION.SDK_INT >= 34) {
             startForeground(NOTIFICATION_ID, notification, ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE)
         } else {
             startForeground(NOTIFICATION_ID, notification)
         }
+    }
+
+    /** Runs on [worker]. */
+    private fun connect(vpn: Boolean, startId: Int) {
+        goForeground("Connecting…") // a disconnect just before may have left the foreground
         watchDefaultNetwork()
-        thread(name = "mkconnect-start") {
-            try {
-                Mkmobile.start(if (vpn) this else null)
-                watchStatus()
-            } catch (e: Exception) {
-                Log.e(TAG, "start failed", e)
-                lastError = e.message
-                stop()
-            }
+        try {
+            Mkmobile.start(if (vpn) this else null)
+            watchStatus(++generation)
+        } catch (e: Exception) {
+            Log.e(TAG, "start failed", e)
+            lastError = e.message
+            disconnect()
+            stopSelfResult(startId)
         }
     }
 
-    // The notification follows the connection, so the shade shows the same
-    // thing the app does: the latency, "no internet" or a reconnect.
-    private fun watchStatus() {
-        watching = true
+    /** Runs on [worker]. Stops the core and gives the network back. */
+    private fun disconnect() {
+        generation++
+        try {
+            Mkmobile.stop()
+        } catch (e: Exception) {
+            Log.e(TAG, "stop failed", e)
+        }
+        tun?.close()
+        tun = null
+        networkCallback?.let { getSystemService(ConnectivityManager::class.java).unregisterNetworkCallback(it) }
+        networkCallback = null
+        if (Build.VERSION.SDK_INT >= 24) stopForeground(STOP_FOREGROUND_REMOVE) else @Suppress("DEPRECATION") stopForeground(true)
+    }
+
+    // The notification follows the connection, so the shade shows what the
+    // app does: the latency, "no internet" or a reconnect. When the core ends
+    // the connection by itself (an error), the VPN is taken down too, so the
+    // phone isn't left with a tunnel that carries nothing.
+    private fun watchStatus(gen: Int) {
         thread(name = "mkconnect-status") {
             var shown = ""
-            while (watching) {
+            while (gen == generation) {
                 val status = runCatching { loadStatus() }.getOrNull()
-                if (status == null || !status.busy) break
-                val text = status.text()
-                if (text != shown) {
+                if (status != null && !status.busy) {
+                    if (status.state == "error") lastError = status.error
+                    worker.execute {
+                        if (gen == generation) {
+                            disconnect()
+                            stopSelf()
+                        }
+                    }
+                    break
+                }
+                val text = status?.text().orEmpty()
+                if (text.isNotEmpty() && text != shown) {
                     shown = text
                     updateNotification(text)
                 }
-                Thread.sleep(5000)
+                Thread.sleep(3000)
             }
-        }
-    }
-
-    private fun stop() {
-        watching = false
-        thread(name = "mkconnect-stop") {
-            try {
-                Mkmobile.stop()
-            } catch (e: Exception) {
-                Log.e(TAG, "stop failed", e)
-            }
-            tun?.close()
-            tun = null
-            networkCallback?.let { getSystemService(ConnectivityManager::class.java).unregisterNetworkCallback(it) }
-            networkCallback = null
-            if (Build.VERSION.SDK_INT >= 24) stopForeground(STOP_FOREGROUND_REMOVE) else @Suppress("DEPRECATION") stopForeground(true)
-            stopSelf()
         }
     }
 
     override fun onRevoke() {
         // Another VPN took over or the user revoked the permission.
-        stop()
+        worker.execute {
+            disconnect()
+            stopSelf()
+        }
     }
 
     override fun onDestroy() {
-        try {
-            Mkmobile.stop()
-        } catch (_: Exception) {
-        }
-        tun?.close()
+        worker.execute { disconnect() }
+        worker.shutdown()
         super.onDestroy()
     }
 
@@ -200,9 +234,6 @@ class MkVpnService : VpnService(), Platform {
         networkCallback = callback
     }
 
-    @Volatile
-    private var watching = false
-
     private fun notification(text: String): Notification {
         val open = PendingIntent.getActivity(
             this, 0, Intent(this, MainActivity::class.java),
@@ -220,6 +251,7 @@ class MkVpnService : VpnService(), Platform {
             .setContentText(text)
             .setContentIntent(open)
             .setOngoing(true)
+            .setOnlyAlertOnce(true)
             .addAction(Notification.Action.Builder(null, "Disconnect", stop).build())
             .build()
     }
@@ -232,20 +264,26 @@ class MkVpnService : VpnService(), Platform {
         private const val TAG = "MKConnect"
         private const val NOTIFICATION_ID = 1
         const val ACTION_STOP = "com.khaliilii.mkconnect.STOP"
+        const val ACTION_SWITCH = "com.khaliilii.mkconnect.SWITCH"
         const val EXTRA_VPN = "vpn"
 
         /** Error of the last failed start, shown by the UI. */
         @Volatile
         var lastError: String? = null
 
-        fun start(context: Context, vpn: Boolean) {
-            lastError = null
-            val intent = Intent(context, MkVpnService::class.java).putExtra(EXTRA_VPN, vpn)
-            if (Build.VERSION.SDK_INT >= 26) context.startForegroundService(intent) else context.startService(intent)
-        }
+        fun start(context: Context, vpn: Boolean) = send(context, null, vpn)
+
+        /** Reconnects with the account now selected. */
+        fun switch(context: Context, vpn: Boolean) = send(context, ACTION_SWITCH, vpn)
 
         fun stop(context: Context) {
             context.startService(Intent(context, MkVpnService::class.java).setAction(ACTION_STOP))
+        }
+
+        private fun send(context: Context, action: String?, vpn: Boolean) {
+            lastError = null
+            val intent = Intent(context, MkVpnService::class.java).setAction(action).putExtra(EXTRA_VPN, vpn)
+            if (Build.VERSION.SDK_INT >= 26) context.startForegroundService(intent) else context.startService(intent)
         }
     }
 }

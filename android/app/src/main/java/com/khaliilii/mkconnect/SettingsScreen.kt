@@ -76,7 +76,7 @@ fun SettingsScreen(options: Options, status: Status, onMessage: (String) -> Unit
 
         HorizontalDivider()
         Text("Connection", fontWeight = FontWeight.Bold)
-        Field("Local proxy port", s.port.toString(), { save(s.copy(port = it.toIntOrNull() ?: s.port)) }, number = true)
+        NumberField("Local proxy port", s.port, { it in 1..65535 }, "A port from 1 to 65535") { save(s.copy(port = it)) }
         SwitchRow(
             "Share the proxy with other devices (e.g. over this phone's hotspot)",
             s.allowLan,
@@ -147,10 +147,9 @@ fun SettingsScreen(options: Options, status: Status, onMessage: (String) -> Unit
         Text("Advanced", fontWeight = FontWeight.Bold)
         Picker("Log level", options.logLevels, s.logLevel) { save(s.copy(logLevel = it)) }
         Picker("VPN network stack", listOf("", "system", "gvisor", "mixed"), s.tunStack) { save(s.copy(tunStack = it)) }
-        Field(
-            "VPN MTU (0 = default)", s.tunMtu.toString(),
-            { save(s.copy(tunMtu = it.toIntOrNull() ?: 0)) }, number = true,
-        )
+        NumberField("VPN MTU (0 = default)", s.tunMtu, { it == 0 || it in 576..65535 }, "0, or from 576 to 65535") {
+            save(s.copy(tunMtu = it))
+        }
         Hint("Changes apply on the next connect.")
     }
 }

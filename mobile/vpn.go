@@ -53,7 +53,12 @@ func (c *TunConfig) Routes() string { return strings.Join(append(c.routes4, c.ro
 // DnsServer is the DNS address to give the VPN (answered by sing-box).
 func (c *TunConfig) DnsServer() string { return c.dns }
 
+// lifeMu serializes starting, stopping and reconnecting, which take seconds.
+// runMu guards what the status shows and is only held briefly, so the app
+// can always read the state ("connecting…") while one of those runs.
 var (
+	lifeMu sync.Mutex
+
 	runMu     sync.Mutex
 	running   engine.Engine
 	session   *engine.Session
@@ -65,7 +70,6 @@ var (
 	activeApp Platform
 
 	// What the running connection is made of, so a reconnect can repeat it.
-	runConfig   []byte
 	runProfile  profile.Profile
 	runSettings profile.Settings
 	runVPN      bool
@@ -79,14 +83,19 @@ var (
 	healthMS    int64
 )
 
-// Health checks: a sing-box that starts is not a working connection. The
-// phone app probes through the local proxy (which runs in VPN mode too) and
-// reports the result, reconnecting when nothing gets through.
+// Health checks: a core that starts is not a working connection. The phone
+// app probes through the local proxy (which runs in VPN mode too) and reports
+// the result, reconnecting when nothing gets through. A reconnect that fails
+// (no network for a moment) is tried again every healthRetry.
 const (
 	healthFirstCheck   = 4 * time.Second
 	healthEvery        = 45 * time.Second
+	healthRetry        = 10 * time.Second
 	healthFailsToRetry = 2
 )
+
+// errGone ends a health monitor: its connection was stopped.
+var errGone = errors.New("connection is gone")
 
 // SetDataDir sets where logs are written (the app's files directory) and
 // sends this package's own log output to the same file, so the app's log
@@ -113,13 +122,18 @@ func ClearLogs() {
 
 // Start connects the active account. With a platform it runs as the
 // system VPN (unless the phone mode is "proxy"); without one only the local
-// proxy runs.
+// proxy runs. Starting while connected (a second tap, the service restarted)
+// does nothing.
 func Start(app Platform) error {
+	lifeMu.Lock()
+	defer lifeMu.Unlock()
 	runMu.Lock()
-	defer runMu.Unlock()
-	if running != nil {
-		return errors.New("already connected")
+	connected := running != nil
+	runMu.Unlock()
+	if connected {
+		return nil
 	}
+
 	mu.Lock()
 	s, err := loaded()
 	if err != nil {
@@ -141,11 +155,7 @@ func Start(app Platform) error {
 		return setError(fmt.Errorf("%q: %w", prof.Name, profile.ErrInfoEntry))
 	}
 
-	settings.Core, settings.Mode = profile.CoreSingBox, profile.ModeProxy
 	vpn := app != nil && settings.PhoneMode != "proxy"
-	if vpn {
-		settings.Mode = profile.ModeTUN
-	}
 	logFile := ""
 	if dataDir != "" {
 		logFile = filepath.Join(dataDir, "core.log")
@@ -153,22 +163,19 @@ func Start(app Platform) error {
 		// file open, and a removed file would take those messages with it.
 		os.Truncate(logFile, 0)
 	}
-	cfg, err := engine.MobileConfig(prof, settings, vpn, logFile)
+	setState("connecting", "", prof.Name)
+	e, core, err := engine.StartMobile(prof, settings, vpn, logFile, newPlatform(app))
 	if err != nil {
 		return setError(err)
 	}
-	runState, runErr, runName = "connecting", "", prof.Name
-	activeApp = app
-	e, err := engine.StartSingBoxPlatform(cfg, newPlatform(app))
-	if err != nil {
-		return setError(err)
-	}
-	running = e
-	session = engine.NewSessionFor(prof, settings, e)
-	runState = "connected"
-	runConfig, runProfile, runSettings = cfg, prof, settings
-	runVPN, runLogFile, runBackups = vpn, logFile, backups
-	healthErr, healthMS = "", 0
+	log.Printf("✅ %s connected through %s", prof.Name, core)
+
+	runMu.Lock()
+	defer runMu.Unlock()
+	running, activeApp = e, app
+	runProfile, runSettings, runVPN, runLogFile, runBackups = prof, settings, vpn, logFile, backups
+	session = newSession(prof, settings, core, e)
+	runState, healthErr, healthMS = "connected", "", 0
 	startHealthMonitor(settings)
 	runProxy = ""
 	if !vpn {
@@ -180,24 +187,38 @@ func Start(app Platform) error {
 	return nil
 }
 
+func newSession(p profile.Profile, s profile.Settings, core string, e engine.Engine) *engine.Session {
+	s.Core = core
+	return engine.NewSessionFor(p, s, e)
+}
+
+func setState(state, errText, name string) {
+	runMu.Lock()
+	defer runMu.Unlock()
+	runState, runErr, runName = state, errText, name
+}
+
 func setError(err error) error {
+	runMu.Lock()
+	defer runMu.Unlock()
 	runState, runErr = "error", err.Error()
 	return err
 }
 
 // Stop disconnects.
 func Stop() error {
+	lifeMu.Lock()
+	defer lifeMu.Unlock()
 	runMu.Lock()
-	defer runMu.Unlock()
-	if running == nil {
-		runState = "idle"
-		return nil
-	}
-	err := running.Close()
+	e := running
 	running, session, activeApp, runProxy = nil, nil, nil, ""
 	monitorStop, healthErr, healthMS = nil, "", 0
 	runState = "idle"
-	return err
+	runMu.Unlock()
+	if e == nil {
+		return nil
+	}
+	return e.Close()
 }
 
 // fetchProxy returns the running local proxy for downloads that fail directly.
@@ -242,14 +263,13 @@ func Logs(maxLines int32) string {
 }
 
 // startHealthMonitor probes the connection through its local proxy, keeps the
-// result in the status and reconnects when two checks in a row fail.
-// runMu must be held.
+// result in the status and reconnects when two checks in a row fail; the
+// second reconnect moves to a backup account (failover). runMu must be held.
 func startHealthMonitor(s profile.Settings) {
 	stop := make(chan struct{})
 	monitorStop = stop
 	go func() {
-		// retries counts reconnects since traffic last got through: the
-		// second one moves to a backup account (failover).
+		// retries counts reconnects since traffic last got through.
 		fails, retries, wait, first := 0, 0, healthFirstCheck, true
 		for {
 			select {
@@ -258,55 +278,67 @@ func startHealthMonitor(s profile.Settings) {
 			case <-time.After(wait):
 			}
 			wait = healthEvery
-			// Confirmed: a fresh connection often stalls for a few seconds
-			// before traffic flows, which must not read as "no internet".
-			latency, err := engine.CheckHealthConfirmed(context.Background(), s, first)
-			first = false
 
 			runMu.Lock()
-			if monitorStop != stop {
-				runMu.Unlock()
-				return // this connection is gone
-			}
-			if err != nil {
-				fails++
-				healthErr, healthMS = err.Error(), 0
-			} else {
-				fails, retries = 0, 0
-				healthErr, healthMS = "", latency.Milliseconds()
-			}
-			auto := s.AutoReconnect
+			gone, down := monitorStop != stop, running == nil
 			runMu.Unlock()
-
-			if err == nil || fails < healthFailsToRetry || !auto {
-				continue
+			if gone {
+				return
+			}
+			if !down {
+				// Confirmed: a fresh connection often stalls for a few seconds
+				// before traffic flows, which must not read as "no internet".
+				latency, err := engine.CheckHealthConfirmed(context.Background(), s, first)
+				first = false
+				runMu.Lock()
+				if monitorStop != stop {
+					runMu.Unlock()
+					return
+				}
+				if err != nil {
+					fails++
+					healthErr, healthMS = err.Error(), 0
+				} else {
+					fails, retries = 0, 0
+					healthErr, healthMS = "", latency.Milliseconds()
+				}
+				runMu.Unlock()
+				if err == nil || fails < healthFailsToRetry || !s.AutoReconnect {
+					continue
+				}
 			}
 			fails, retries = 0, retries+1
-			if rerr := reconnect(stop, retries >= 2); rerr != nil {
-				return // the connection ended for good
+			switch err := reconnect(stop, retries >= 2); {
+			case errors.Is(err, errGone):
+				return
+			case err != nil:
+				log.Printf("🔄 reconnecting failed (%v); trying again in %s", err, healthRetry)
+				wait = healthRetry
+			default:
+				first = true
 			}
 		}
 	}()
 }
 
 // reconnect starts the connection again, in place, after it stopped carrying
-// traffic: the same account, or with failover the best backup account.
+// traffic: the same account, or with failover the best backup account. When
+// starting fails the connection stays "reconnecting" without a core, and the
+// monitor tries again.
 func reconnect(stop chan struct{}, failover bool) error {
+	lifeMu.Lock()
+	defer lifeMu.Unlock()
 	runMu.Lock()
-	defer runMu.Unlock()
-	if monitorStop != stop || running == nil {
-		return errors.New("connection is gone")
+	if monitorStop != stop {
+		runMu.Unlock()
+		return errGone
 	}
 	runState = "reconnecting"
-	for failover && len(runBackups) > 0 {
+	if failover && len(runBackups) > 0 {
 		next := runBackups[0]
 		runBackups = runBackups[1:]
-		cfg, err := engine.MobileConfig(next, runSettings, runVPN, runLogFile)
-		if err != nil {
-			continue
-		}
 		log.Printf("🔀 %s keeps failing; switching to %s", runProfile.Name, next.Name)
-		runConfig, runProfile, runName = cfg, next, next.Name
+		runProfile, runName = next, next.Name
 		mu.Lock()
 		if s, err := loaded(); err == nil {
 			if _, err := s.Find(next.ID); err == nil {
@@ -315,17 +347,29 @@ func reconnect(stop chan struct{}, failover bool) error {
 			}
 		}
 		mu.Unlock()
-		break
 	}
-	running.Close()
+	old := running
 	running, session = nil, nil
-	e, err := engine.StartSingBoxPlatform(runConfig, newPlatform(activeApp))
-	if err != nil {
-		monitorStop = nil
-		return setError(err)
+	prof, settings, vpn, logFile, app := runProfile, runSettings, runVPN, runLogFile, activeApp
+	runMu.Unlock()
+
+	if old != nil {
+		old.Close()
 	}
-	running = e
-	session = engine.NewSessionFor(runProfile, runSettings, e)
-	runState, healthErr, healthMS = "connected", "", 0
+	e, core, err := engine.StartMobile(prof, settings, vpn, logFile, newPlatform(app))
+	runMu.Lock()
+	defer runMu.Unlock()
+	if monitorStop != stop { // stopped meanwhile
+		if e != nil {
+			e.Close()
+		}
+		return errGone
+	}
+	if err != nil {
+		runErr = err.Error()
+		return err
+	}
+	running, session = e, newSession(prof, settings, core, e)
+	runState, runErr, healthErr, healthMS = "connected", "", "", 0
 	return nil
 }

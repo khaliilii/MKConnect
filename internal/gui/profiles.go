@@ -61,7 +61,7 @@ func (u *ui) newProfilesPanel() fyne.CanvasObject {
 			row := o.(*fyne.Container)
 			left, right := row.Objects[0].(*fyne.Container), row.Objects[1].(*fyne.Container)
 			left.Objects[0].(*widget.Label).SetText(p.Name)
-			left.Objects[1].(*widget.Label).SetText(profileSummary(p))
+			left.Objects[1].(*widget.Label).SetText(siteFailures(p.Test) + profileSummary(p))
 			main, extra, imp := testText(p.Test)
 			latency := right.Objects[0].(*widget.Label)
 			latency.Importance = imp

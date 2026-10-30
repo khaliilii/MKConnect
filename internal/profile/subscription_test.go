@@ -287,26 +287,41 @@ func TestSettingsMigration(t *testing.T) {
 	}
 }
 
-// TestStuckAccountsSortBehind: an account whose parallel pages got stuck
-// sorts behind a slower one whose didn't, and says so.
-func TestStuckAccountsSortBehind(t *testing.T) {
+// TestSiteFailuresSortBehind: an account on which sites didn't open sorts
+// behind a slower one that opened them all, and says which failed; with the
+// same sites open, the one with fewer stuck connections goes first.
+func TestSiteFailuresSortBehind(t *testing.T) {
+	site := func(name string, ok bool, stuck int) SiteResult {
+		return SiteResult{Name: name, OK: ok, Parts: 8, Stuck: stuck}
+	}
 	ps := []Profile{
-		{ID: "fast-stuck", Test: &TestResult{Sent: 1, Received: 1, Latency: 80, Speed: 5 << 20, Parallel: 12, Stuck: 2}},
-		{ID: "slow-clean", Test: &TestResult{Sent: 1, Received: 1, Latency: 200, Speed: 1 << 20, Parallel: 12}},
-		{ID: "one-stuck", Test: &TestResult{Sent: 1, Received: 1, Latency: 90, Speed: 4 << 20, Parallel: 12, Stuck: 1}},
+		{ID: "fast-failing", Test: &TestResult{Sent: 1, Received: 1, Latency: 80, Speed: 5 << 20,
+			Sites: []SiteResult{site("YouTube", false, 2), site("Telegram", false, 1), site("X", true, 0)}}},
+		{ID: "slow-clean", Test: &TestResult{Sent: 1, Received: 1, Latency: 200, Speed: 1 << 20,
+			Sites: []SiteResult{site("YouTube", true, 0), site("Telegram", true, 0), site("X", true, 0)}}},
+		{ID: "one-failing", Test: &TestResult{Sent: 1, Received: 1, Latency: 90, Speed: 4 << 20,
+			Sites: []SiteResult{site("YouTube", false, 1), site("Telegram", true, 0), site("X", true, 0)}}},
+		{ID: "one-failing-more-stuck", Test: &TestResult{Sent: 1, Received: 1, Latency: 85, Speed: 4 << 20,
+			Sites: []SiteResult{site("YouTube", false, 3), site("Telegram", true, 0), site("X", true, 0)}}},
 	}
 	for _, by := range []string{SortSpeed, SortLatency} {
-		idx := []int{0, 1, 2}
+		idx := []int{0, 1, 2, 3}
 		SortProfiles(ps, idx, by)
 		var got []string
 		for _, i := range idx {
 			got = append(got, ps[i].ID)
 		}
-		if want := []string{"slow-clean", "one-stuck", "fast-stuck"}; !slices.Equal(got, want) {
+		if want := []string{"slow-clean", "one-failing", "one-failing-more-stuck", "fast-failing"}; !slices.Equal(got, want) {
 			t.Errorf("by %s: %v, want %v", by, got, want)
 		}
 	}
-	if s := ps[0].Test.Summary(); !strings.Contains(s, "2/12 stuck") {
-		t.Errorf("summary %q doesn't say pages got stuck", s)
+	if s := ps[0].Test.Summary(); !strings.HasSuffix(s, "1/3 sites · YouTube, Telegram failed") {
+		t.Errorf("summary %q doesn't say which sites failed", s)
+	}
+	if s := ps[1].Test.Summary(); !strings.HasSuffix(s, " · 3/3 sites") {
+		t.Errorf("summary %q doesn't say the sites opened", s)
+	}
+	if s := (&TestResult{Sent: 1, Received: 1, Latency: 80}).Summary(); strings.Contains(s, "sites") {
+		t.Errorf("summary %q mentions sites that weren't checked", s)
 	}
 }

@@ -51,11 +51,13 @@ A multi-account client for **SSH, VMess, VLESS, Trojan, Shadowsocks, Hysteria2 a
 - **Update & test**: one click updates the subscriptions (the one shown, or all), measures latency and download
   speed of every account shown (at most 4 s of download each, to spare the data quota) and sorts the list by
   speed, fastest first; subscription messages such as "Used: 47 GB" are skipped. The phone app has the same button.
-  The speed pass also runs a **load check**: 24 sites' hosts (YouTube, Instagram, Telegram, Facebook, X, …) opened at
-  once, like a browser starting a page, reading the first 16 KB of each (~0.4 MB per account). An account whose
-  connections get stuck shows "2/24 stuck" and sorts behind those whose don't: on some networks a server answers
-  probes quickly and downloads fast over one connection, yet a share of new connections freezes at the start, and
-  pages that need dozens of them never finish loading (seen on Iranian Wi-Fi with accounts meant for Irancell)
+  The speed pass also runs a **site check**: YouTube, Instagram, Telegram (web), Facebook and X are opened at once
+  the way a browser opens them (the page, the hosts it loads from, then the first scripts and styles it names,
+  each on a new connection; about 35 connections and 4 MB per account). Each account shows "5/5 sites", or
+  "3/5 sites" with the ones that didn't open named in its row ("YouTube, Telegram failed"), and accounts on which
+  sites fail sort behind those on which they all open: on some networks a server answers probes quickly and
+  downloads fast over one connection, yet a share of new connections freezes at the start, and pages that need
+  dozens of them never finish loading (seen on Iranian Wi-Fi with accounts meant for Irancell)
 - core, mode (Proxy / TUN), local port, LAN sharing and proxy password, all saved as you change them
 - one-click connect / disconnect; selecting another account while connected switches to it
 - live connection info: inbound, outbound, core, upload / download speed and totals

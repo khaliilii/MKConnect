@@ -68,7 +68,7 @@ shown by "profile list" and the app.`,
 			ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
 			defer stop()
 
-			results := engine.TestMany(ctx, store.Profiles, idx, store.Settings, engine.TestOptions{Speed: speed, Load: speed}, parallel,
+			results := engine.TestMany(ctx, store.Profiles, idx, store.Settings, engine.TestOptions{Speed: speed, Sites: speed}, parallel,
 				func(i int, r *profile.TestResult) {
 					fmt.Fprintf(os.Stderr, "%-40s %s\n", store.Profiles[i].Name, describe(r))
 				})
@@ -87,25 +87,29 @@ shown by "profile list" and the app.`,
 			profile.SortProfiles(store.Profiles, idx, sortBy)
 			fmt.Fprintln(out)
 			w := tabwriter.NewWriter(out, 0, 0, 2, ' ', 0)
-			fmt.Fprintln(w, "#\tACCOUNT\tLATENCY\tOK\tJITTER\tSPEED\tID")
+			fmt.Fprintln(w, "#\tACCOUNT\tLATENCY\tOK\tJITTER\tSPEED\tSITES\tID")
 			for n, i := range idx {
 				p := &store.Profiles[i]
 				r := p.Test
 				if !r.OK() {
-					fmt.Fprintf(w, "%d\t%s\t-\t0/%d\t\t\t%s\t%s\n", n+1, p.Name, r.Sent, p.ID, r.Error)
+					fmt.Fprintf(w, "%d\t%s\t-\t0/%d\t\t\t\t%s\t%s\n", n+1, p.Name, r.Sent, p.ID, r.Error)
 					continue
 				}
 				sp := "-"
 				if r.Speed > 0 {
 					sp = profile.FormatBytes(r.Speed) + "/s"
 				}
-				fmt.Fprintf(w, "%d\t%s\t%d ms\t%d/%d\t%d ms\t%s\t%s\n", n+1, p.Name, r.Latency, r.Received, r.Sent, r.Jitter, sp, p.ID)
+				sites := r.SitesText()
+				if sites == "" {
+					sites = "-"
+				}
+				fmt.Fprintf(w, "%d\t%s\t%d ms\t%d/%d\t%d ms\t%s\t%s\t%s\n", n+1, p.Name, r.Latency, r.Received, r.Sent, r.Jitter, sp, sites, p.ID)
 			}
 			return w.Flush()
 		},
 	}
 	cmd.Flags().StringVar(&group, "group", "", "only test this group")
-	cmd.Flags().BoolVar(&speed, "speed", false, "also measure download speed (uses some traffic)")
+	cmd.Flags().BoolVar(&speed, "speed", false, "also measure download speed and open YouTube, Instagram, Telegram, Facebook and X (uses some traffic)")
 	cmd.Flags().IntVar(&parallel, "parallel", 8, "accounts tested at the same time")
 	cmd.Flags().StringVar(&sortBy, "sort", "", "sort the table: latency or speed")
 	return cmd

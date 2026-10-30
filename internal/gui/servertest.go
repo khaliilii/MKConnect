@@ -3,6 +3,7 @@ package gui
 import (
 	"context"
 	"fmt"
+	"strings"
 	"time"
 
 	"fyne.io/fyne/v2"
@@ -31,9 +32,9 @@ func (u *ui) newTestControls() (testBtn, sortBtn *widget.Button, bar *fyne.Conta
 	testBtn.OnTapped = func() {
 		menu := fyne.NewMenu("",
 			fyne.NewMenuItem("Test latency of the accounts shown", func() { u.testShown(false) }),
-			fyne.NewMenuItem("Test latency and speed of the accounts shown", func() { u.testShown(true) }),
+			fyne.NewMenuItem("Test latency, speed and sites of the accounts shown", func() { u.testShown(true) }),
 			fyne.NewMenuItemSeparator(),
-			fyne.NewMenuItem("Test the selected account (with speed)", u.testSelected),
+			fyne.NewMenuItem("Test the selected account (with speed and sites)", u.testSelected),
 		)
 		widget.ShowPopUpMenuAtRelativePosition(menu, u.win.Canvas(), fyne.NewPos(0, testBtn.Size().Height), testBtn)
 	}
@@ -84,7 +85,7 @@ func (u *ui) setSort(by string) {
 
 func (u *ui) testShown(speed bool) {
 	idx := append([]int(nil), u.visible...)
-	u.runTests(idx, engine.TestOptions{Speed: speed, Load: speed}, nil)
+	u.runTests(idx, engine.TestOptions{Speed: speed, Sites: speed}, nil)
 }
 
 // rankSpeedTime caps each account's download in "Update & test": long enough
@@ -143,7 +144,7 @@ func (u *ui) updateAndRank() {
 			finished()
 			return
 		}
-		u.runTests(idx, engine.TestOptions{Speed: true, SpeedTime: rankSpeedTime, Load: true}, func() {
+		u.runTests(idx, engine.TestOptions{Speed: true, SpeedTime: rankSpeedTime, Sites: true}, func() {
 			u.setSort(profile.SortSpeed)
 			finished()
 		})
@@ -189,7 +190,7 @@ func (u *ui) testSelected() {
 	}
 	for i := range u.store.Profiles {
 		if u.store.Profiles[i].ID == p.ID {
-			u.runTests([]int{i}, engine.TestOptions{Speed: true, Load: true}, nil)
+			u.runTests([]int{i}, engine.TestOptions{Speed: true, Sites: true}, nil)
 			return
 		}
 	}
@@ -303,5 +304,21 @@ func testText(r *profile.TestResult) (main, extra string, imp widget.Importance)
 			extra += fmt.Sprintf(" · %d/%d", r.Received, r.Sent)
 		}
 	}
+	if len(r.Sites) > 0 { // the failed ones are named in the row's detail (siteFailures)
+		failed := len(r.FailedSites())
+		extra += fmt.Sprintf(" · %d/%d sites", len(r.Sites)-failed, len(r.Sites))
+		if failed > 0 {
+			imp = widget.WarningImportance
+		}
+	}
 	return main, extra, imp
+}
+
+// siteFailures names the sites that didn't open through an account, for the
+// start of its row's detail: "YouTube, Telegram failed · ".
+func siteFailures(r *profile.TestResult) string {
+	if failed := r.FailedSites(); len(failed) > 0 {
+		return strings.Join(failed, ", ") + " failed · "
+	}
+	return ""
 }

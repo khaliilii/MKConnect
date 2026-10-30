@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"regexp"
 	"sort"
+	"strings"
 	"time"
 )
 
@@ -15,17 +16,59 @@ const (
 
 // TestResult is how a server performed in a test through the proxy.
 type TestResult struct {
-	At       time.Time `json:"at"`
-	Sent     int       `json:"sent"`               // latency probes sent
-	Received int       `json:"received"`           // probes that succeeded
-	Latency  int       `json:"latency_ms"`         // average of the successful probes
-	Jitter   int       `json:"jitter_ms"`          // max - min of the successful probes
-	Speed    int64     `json:"speed_bps,omitzero"` // download bytes/s, 0 = not measured
-	Error    string    `json:"error,omitempty"`    // why the server failed
-	// Parallel pages opened at once by the load check, and how many of them
-	// got stuck (0 = not checked).
-	Parallel int `json:"parallel,omitzero"`
-	Stuck    int `json:"stuck,omitzero"`
+	At       time.Time    `json:"at"`
+	Sent     int          `json:"sent"`               // latency probes sent
+	Received int          `json:"received"`           // probes that succeeded
+	Latency  int          `json:"latency_ms"`         // average of the successful probes
+	Jitter   int          `json:"jitter_ms"`          // max - min of the successful probes
+	Speed    int64        `json:"speed_bps,omitzero"` // download bytes/s, 0 = not measured
+	Error    string       `json:"error,omitempty"`    // why the server failed
+	Sites    []SiteResult `json:"sites,omitempty"`    // the site check, nil = not checked
+}
+
+// SiteResult is how a website opened through the server in the site check.
+type SiteResult struct {
+	Name  string `json:"name"`
+	OK    bool   `json:"ok"`             // the page and all its parts arrived
+	Ms    int    `json:"ms,omitzero"`    // how long that took
+	Parts int    `json:"parts"`          // connections the page needed
+	Stuck int    `json:"stuck,omitzero"` // of them, those that froze or failed
+}
+
+// FailedSites names the sites that didn't open.
+func (r *TestResult) FailedSites() []string {
+	var out []string
+	if r != nil {
+		for _, s := range r.Sites {
+			if !s.OK {
+				out = append(out, s.Name)
+			}
+		}
+	}
+	return out
+}
+
+// stuck counts the connections that froze in the site check.
+func (r *TestResult) stuck() int {
+	n := 0
+	for _, s := range r.Sites {
+		n += s.Stuck
+	}
+	return n
+}
+
+// SitesText says how many sites opened, "5/5 sites", and names the ones that
+// didn't: "3/5 sites · YouTube, Telegram failed". Empty when not checked.
+func (r *TestResult) SitesText() string {
+	if r == nil || len(r.Sites) == 0 {
+		return ""
+	}
+	failed := r.FailedSites()
+	s := fmt.Sprintf("%d/%d sites", len(r.Sites)-len(failed), len(r.Sites))
+	if len(failed) > 0 {
+		s += " · " + strings.Join(failed, ", ") + " failed"
+	}
+	return s
 }
 
 // OK reports whether the server answered at least once.
@@ -46,8 +89,8 @@ func (r *TestResult) Summary() string {
 	if r.Speed > 0 {
 		s += " · " + FormatBytes(r.Speed) + "/s"
 	}
-	if r.Stuck > 0 {
-		s += fmt.Sprintf(" · %d/%d stuck", r.Stuck, r.Parallel)
+	if t := r.SitesText(); t != "" {
+		s += " · " + t
 	}
 	return s
 }
@@ -82,9 +125,12 @@ func SortProfiles(profiles []Profile, idx []int, by string) {
 			return false
 		}
 		// Pages hang on an account whose connections get stuck, however
-		// fast it is: those go behind the ones that passed the load check.
-		if ra.Stuck != rb.Stuck {
-			return ra.Stuck < rb.Stuck
+		// fast it is: those go behind the ones that opened the sites.
+		if fa, fb := len(ra.FailedSites()), len(rb.FailedSites()); fa != fb {
+			return fa < fb
+		}
+		if sa, sb := ra.stuck(), rb.stuck(); sa != sb {
+			return sa < sb
 		}
 		if by == SortSpeed && ra.Speed != rb.Speed {
 			return ra.Speed > rb.Speed

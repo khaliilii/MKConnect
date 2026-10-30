@@ -166,3 +166,24 @@ func TestUpdateAndRank(t *testing.T) {
 		t.Fatal("the button stayed disabled")
 	}
 }
+
+// TestSiteResultsInRow: a row counts the sites that opened through the
+// account and names the ones that didn't, warning about them.
+func TestSiteResultsInRow(t *testing.T) {
+	r := &profile.TestResult{Sent: 3, Received: 3, Latency: 120, Speed: 2 << 20, Sites: []profile.SiteResult{
+		{Name: "YouTube", OK: true}, {Name: "Instagram"}, {Name: "Telegram"}, {Name: "X", OK: true}}}
+	main, extra, imp := testText(r)
+	if main != "120 ms" || extra != "2.0 MB/s · 2/4 sites" || imp != widget.WarningImportance {
+		t.Errorf("row text %q %q %v", main, extra, imp)
+	}
+	if got := siteFailures(r); got != "Instagram, Telegram failed · " {
+		t.Errorf("detail starts %q", got)
+	}
+	r.Sites = []profile.SiteResult{{Name: "YouTube", OK: true}, {Name: "X", OK: true}}
+	if _, extra, imp := testText(r); extra != "2.0 MB/s · 2/2 sites" || imp != widget.SuccessImportance {
+		t.Errorf("all open: %q %v", extra, imp)
+	}
+	if siteFailures(r) != "" || siteFailures(nil) != "" {
+		t.Error("a row names failed sites when none failed")
+	}
+}

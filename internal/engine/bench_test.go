@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -73,17 +74,30 @@ func TestBenchmark(t *testing.T) {
 	}
 }
 
-// TestLoadCheck: pages opened at once through a working account; the one
-// that sends a little and then freezes counts as stuck, the rest don't.
-func TestLoadCheck(t *testing.T) {
+// TestSiteCheck: sites opened through a working account, the way a browser
+// does: the page (after a redirect), the hosts it loads from, and the scripts
+// and styles it names. A site whose page or any part freezes doesn't open;
+// any HTTP answer does.
+func TestSiteCheck(t *testing.T) {
 	if startSingBox == nil {
 		t.Skip("sing-box not compiled in")
 	}
+	var mu sync.Mutex
+	asked := map[string]bool{}
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		asked[r.URL.RequestURI()] = true
+		mu.Unlock()
 		switch r.URL.Path {
-		case "/big": // more than the check reads
-			io.WriteString(w, strings.Repeat("x", 200<<10))
-		case "/stall": // what a frozen connection looks like
+		case "/old":
+			http.Redirect(w, r, "/home/", http.StatusFound)
+		case "/home/": // assets far in, as on YouTube, one of them twice
+			io.WriteString(w, `<html><head><link rel="stylesheet" href="style.css"></head><body>`+strings.Repeat("x", 900<<10)+
+				`<script src="/s/app.js?v=1&amp;lang=en"></script><script src="/s/app.js?v=1&amp;lang=en"></script>`+
+				`<a href="/not-an-asset.js">a link</a><img src="/pic.png"></body></html>`)
+		case "/frozen-page/":
+			io.WriteString(w, `<script src="/stall.js"></script>`)
+		case "/stall", "/stall.js": // what a frozen connection looks like
 			io.WriteString(w, strings.Repeat("x", 8<<10))
 			w.(http.Flusher).Flush()
 			select {
@@ -93,15 +107,20 @@ func TestLoadCheck(t *testing.T) {
 		case "/forbidden": // an answer is an answer: the server got through
 			http.Error(w, "no", http.StatusForbidden)
 		default:
-			io.WriteString(w, "small page")
+			io.WriteString(w, strings.Repeat("y", 300<<10)) // more than the check reads
 		}
 	}))
 	defer srv.Close()
 	base := strings.Replace(srv.URL, "127.0.0.1", "localhost", 1)
-	oldURLs, oldStall := LoadURLs, loadStall
-	LoadURLs = []string{base + "/a", base + "/big", base + "/stall", base + "/forbidden", base + "/b"}
-	loadStall = 500 * time.Millisecond
-	defer func() { LoadURLs, loadStall = oldURLs, oldStall }()
+	oldSites, oldStall := Sites, siteStall
+	Sites = []Site{
+		{"Good", base + "/old", []string{base + "/cdn"}},
+		{"Forbidden", base + "/forbidden", nil},
+		{"FrozenAsset", base + "/frozen-page/", nil},
+		{"FrozenHost", base + "/other", []string{base + "/stall"}},
+	}
+	siteStall = 500 * time.Millisecond
+	defer func() { Sites, siteStall = oldSites, oldStall }()
 
 	port := freePort(t)
 	startProtocolServer(t, []obj{{
@@ -115,10 +134,32 @@ func TestLoadCheck(t *testing.T) {
 	}
 	defer stop()
 	start := time.Now()
-	if got := loadCheck(t.Context(), lp); got != 1 {
-		t.Errorf("stuck = %d, want 1 (only the frozen page)", got)
-	}
+	got := siteCheck(t.Context(), lp)
 	if took := time.Since(start); took > 3*time.Second {
-		t.Errorf("the check took %s: a frozen page should be given up after the stall limit", took)
+		t.Errorf("the check took %s: a frozen part should be given up after the stall limit", took)
+	}
+	want := []profile.SiteResult{
+		{Name: "Good", OK: true, Parts: 4},
+		{Name: "Forbidden", OK: true, Parts: 1},
+		{Name: "FrozenAsset", Parts: 2, Stuck: 1},
+		{Name: "FrozenHost", Parts: 2, Stuck: 1},
+	}
+	for i, w := range want {
+		g := got[i]
+		if g.OK && g.Ms <= 0 || !g.OK && g.Ms != 0 {
+			t.Errorf("%s: %d ms", g.Name, g.Ms)
+		}
+		g.Ms = 0
+		if g != w {
+			t.Errorf("got %+v, want %+v", g, w)
+		}
+	}
+	for _, u := range []string{"/home/style.css", "/s/app.js?v=1&lang=en"} {
+		if !asked[u] {
+			t.Errorf("the page's asset %s wasn't loaded (asked: %v)", u, asked)
+		}
+	}
+	if asked["/not-an-asset.js"] || asked["/pic.png"] {
+		t.Error("loaded something that isn't a script or style the page needs")
 	}
 }

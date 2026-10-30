@@ -114,7 +114,7 @@ fun AccountsScreen(
                 IconButton(onClick = { testMenu = true }) { Icon(Icons.Filled.Speed, "Test servers") }
                 DropdownMenu(expanded = testMenu, onDismissRequest = { testMenu = false }) {
                     DropdownMenuItem(text = { Text("Test all (latency)") }, onClick = { testMenu = false; onStartTest(false) })
-                    DropdownMenuItem(text = { Text("Test all (latency + speed)") }, onClick = { testMenu = false; onStartTest(true) })
+                    DropdownMenuItem(text = { Text("Test all (latency, speed + sites)") }, onClick = { testMenu = false; onStartTest(true) })
                     if (test.running) {
                         DropdownMenuItem(text = { Text("Cancel the running test") }, onClick = { testMenu = false; onCancelTest() })
                     }

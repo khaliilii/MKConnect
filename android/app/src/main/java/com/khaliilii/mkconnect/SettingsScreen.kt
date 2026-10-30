@@ -146,7 +146,6 @@ fun SettingsScreen(options: Options, status: Status, onMessage: (String) -> Unit
         HorizontalDivider()
         Text("Advanced", fontWeight = FontWeight.Bold)
         Picker("Log level", options.logLevels, s.logLevel) { save(s.copy(logLevel = it)) }
-        Picker("VPN network stack", listOf("", "system", "gvisor", "mixed"), s.tunStack) { save(s.copy(tunStack = it)) }
         NumberField("VPN MTU (0 = default)", s.tunMtu, { it == 0 || it in 576..65535 }, "0, or from 576 to 65535") {
             save(s.copy(tunMtu = it))
         }

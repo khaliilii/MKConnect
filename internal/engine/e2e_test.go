@@ -351,3 +351,32 @@ func TestStartMobileUsesTheDesktopCore(t *testing.T) {
 		})
 	}
 }
+
+// TestPhoneVPNUsesGVisor: the phone's VPN runs the gVisor stack whatever the
+// stored stack says, on both of its configs (sing-box alone, and in front of
+// Xray); other stacks answer apps' TCP from the app's own excluded sockets,
+// so nothing but DNS gets through.
+func TestPhoneVPNUsesGVisor(t *testing.T) {
+	stored := testSettings(t)
+	stored.TUNStack = "system"
+	s := phoneSettings(stored, true)
+	p := profile.Profile{Name: "ss", Type: profile.TypeShadowsocks, Server: "127.0.0.1", Port: 1, Method: "aes-256-gcm", Password: "pw"}
+	alone, err := singBoxConfig(&p, &s, &tunOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for name, cfg := range map[string]obj{"sing-box": alone, "in front of xray": singBoxTUNConfig(&s, s.ListenPort, &tunOptions{})} {
+		var stack any
+		for _, in := range cfg["inbounds"].([]obj) {
+			if in["type"] == "tun" {
+				stack = in["stack"]
+			}
+		}
+		if stack != "gvisor" {
+			t.Errorf("%s: TUN stack %v, want gvisor", name, stack)
+		}
+	}
+	if proxy := phoneSettings(stored, false); proxy.Mode != profile.ModeProxy || proxy.TUNStack != "system" {
+		t.Errorf("proxy mode changed: %+v", proxy)
+	}
+}

@@ -9,8 +9,11 @@ import android.net.ConnectivityManager
 import android.net.LinkProperties
 import android.net.Network
 import android.net.NetworkCapabilities
+import android.net.NetworkRequest
 import android.net.VpnService
 import android.os.Build
+import android.os.Handler
+import android.os.Looper
 import android.os.ParcelFileDescriptor
 import android.util.Log
 import mkmobile.Mkmobile
@@ -228,16 +231,32 @@ class MkVpnService : VpnService(), Platform {
         return out.toString()
     }
 
-    /** Keeps the core informed about Android's default (non-VPN) network. */
+    /**
+     * Keeps the core informed about the network under the VPN: the best one
+     * that isn't a VPN (Wi-Fi or mobile data). The default network callback
+     * would report this app's own VPN once it is up, and the core must not
+     * take its own tunnel for the way out.
+     */
     private fun watchDefaultNetwork() {
-        if (networkCallback != null || Build.VERSION.SDK_INT < 24) return
+        if (networkCallback != null) return
         val cm = getSystemService(ConnectivityManager::class.java)
         val callback = object : ConnectivityManager.NetworkCallback() {
-            override fun onLinkPropertiesChanged(network: Network, lp: LinkProperties) = report(lp)
+            private var current: Network? = null
+
             override fun onAvailable(network: Network) {
+                current = network
                 cm.getLinkProperties(network)?.let { report(it) }
             }
-            override fun onLost(network: Network) = Mkmobile.updateDefaultInterface("", -1)
+
+            override fun onLinkPropertiesChanged(network: Network, lp: LinkProperties) {
+                if (network == current) report(lp)
+            }
+
+            override fun onLost(network: Network) {
+                if (network != current) return
+                current = null
+                Mkmobile.updateDefaultInterface("", -1)
+            }
 
             private fun report(lp: LinkProperties) {
                 val name = lp.interfaceName ?: return
@@ -245,7 +264,15 @@ class MkVpnService : VpnService(), Platform {
                 Mkmobile.updateDefaultInterface(name, index)
             }
         }
-        cm.registerDefaultNetworkCallback(callback)
+        val request = NetworkRequest.Builder()
+            .addCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)
+            .addCapability(NetworkCapabilities.NET_CAPABILITY_NOT_VPN)
+            .build()
+        if (Build.VERSION.SDK_INT >= 31) {
+            cm.registerBestMatchingNetworkCallback(request, callback, Handler(Looper.getMainLooper()))
+        } else {
+            cm.requestNetwork(request, callback)
+        }
         networkCallback = callback
     }
 

@@ -372,7 +372,7 @@ private fun AccountRow(
             IconButton({ menu = true }) { Icon(Icons.Filled.MoreVert, "Actions for ${account.name}") }
             DropdownMenu(menu, { menu = false }) {
                 DropdownMenuItem(text = { Text("Edit") }, onClick = { menu = false; actions.edit(account) })
-                DropdownMenuItem(text = { Text("Test this account") }, onClick = { menu = false; actions.test(account) })
+                DropdownMenuItem(text = { Text("Test: latency, speed and sites") }, onClick = { menu = false; actions.test(account) })
                 DropdownMenuItem(text = { Text("Copy share link") }, onClick = { menu = false; actions.share(account) })
                 DropdownMenuItem(text = { Text("Move to group…") }, onClick = { menu = false; actions.move(account) })
                 HorizontalDivider()

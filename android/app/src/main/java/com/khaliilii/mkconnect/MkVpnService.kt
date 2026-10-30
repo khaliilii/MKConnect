@@ -42,6 +42,10 @@ class MkVpnService : VpnService(), Platform {
     @Volatile
     private var generation = 0
 
+    /** A connection is up (or starting); only then does the service have anything to stop. */
+    @Volatile
+    private var active = false
+
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         // Restarted by the system (no intent) or by always-on VPN: connect as a VPN.
         val vpn = intent?.getBooleanExtra(EXTRA_VPN, true) ?: true
@@ -79,8 +83,9 @@ class MkVpnService : VpnService(), Platform {
         goForeground("Connecting…") // a disconnect just before may have left the foreground
         watchDefaultNetwork()
         try {
+            active = true
             Mkmobile.start(if (vpn) this else null)
-            watchStatus(++generation)
+            watchStatus(++generation, startId)
         } catch (e: Exception) {
             Log.e(TAG, "start failed", e)
             lastError = e.message
@@ -92,6 +97,7 @@ class MkVpnService : VpnService(), Platform {
     /** Runs on [worker]. Stops the core and gives the network back. */
     private fun disconnect() {
         generation++
+        active = false
         try {
             Mkmobile.stop()
         } catch (e: Exception) {
@@ -108,17 +114,20 @@ class MkVpnService : VpnService(), Platform {
     // app does: the latency, "no internet" or a reconnect. When the core ends
     // the connection by itself (an error), the VPN is taken down too, so the
     // phone isn't left with a tunnel that carries nothing.
-    private fun watchStatus(gen: Int) {
+    private fun watchStatus(gen: Int, startId: Int) {
         thread(name = "mkconnect-status") {
             var shown = ""
             while (gen == generation) {
                 val status = runCatching { loadStatus() }.getOrNull()
                 if (status != null && !status.busy) {
                     if (status.state == "error") lastError = status.error
-                    worker.execute {
-                        if (gen == generation) {
-                            disconnect()
-                            stopSelf()
+                    // The service may be gone already (a disconnect raced this).
+                    runCatching {
+                        worker.execute {
+                            if (gen == generation) {
+                                disconnect()
+                                stopSelfResult(startId) // not if a newer command came in
+                            }
                         }
                     }
                     break
@@ -134,15 +143,21 @@ class MkVpnService : VpnService(), Platform {
     }
 
     override fun onRevoke() {
-        // Another VPN took over or the user revoked the permission.
-        worker.execute {
-            disconnect()
-            stopSelf()
+        // Another VPN took over or the user revoked the permission: whatever
+        // is queued, the tunnel is gone.
+        runCatching {
+            worker.execute {
+                disconnect()
+                stopSelf()
+            }
         }
     }
 
     override fun onDestroy() {
-        worker.execute { disconnect() }
+        // Normally the connection was stopped before the service ends; if the
+        // system ends it while connected, stop the core too. Never otherwise:
+        // a new service's connection may already be starting.
+        if (active) runCatching { worker.execute { disconnect() } }
         worker.shutdown()
         super.onDestroy()
     }

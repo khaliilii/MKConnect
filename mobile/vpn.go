@@ -174,7 +174,7 @@ func Start(app Platform) error {
 	defer runMu.Unlock()
 	running, activeApp = e, app
 	runProfile, runSettings, runVPN, runLogFile, runBackups = prof, settings, vpn, logFile, backups
-	session = newSession(prof, settings, core, e)
+	session = newSession(prof, settings, vpn, core, e)
 	runState, healthErr, healthMS = "connected", "", 0
 	startHealthMonitor(settings)
 	runProxy = ""
@@ -187,8 +187,14 @@ func Start(app Platform) error {
 	return nil
 }
 
-func newSession(p profile.Profile, s profile.Settings, core string, e engine.Engine) *engine.Session {
-	s.Core = core
+// newSession describes the connection as it runs: the core that carries it
+// and, in VPN mode, the TUN among the inbounds (the stored mode is the
+// desktop's).
+func newSession(p profile.Profile, s profile.Settings, vpn bool, core string, e engine.Engine) *engine.Session {
+	s.Core, s.Mode, s.ShareInterfaces = core, profile.ModeProxy, nil
+	if vpn {
+		s.Mode = profile.ModeTUN
+	}
 	return engine.NewSessionFor(p, s, e)
 }
 
@@ -307,8 +313,13 @@ func startHealthMonitor(s profile.Settings) {
 					continue
 				}
 			}
-			fails, retries = 0, retries+1
-			switch err := reconnect(stop, retries >= 2); {
+			// A core that failed to start again (a moment without network) is
+			// retried as it was: only a connection that started and still
+			// carried nothing counts toward failing over.
+			if !down {
+				fails, retries = 0, retries+1
+			}
+			switch err := reconnect(stop, !down && retries >= 2); {
 			case errors.Is(err, errGone):
 				return
 			case err != nil:
@@ -356,20 +367,16 @@ func reconnect(stop chan struct{}, failover bool) error {
 	if old != nil {
 		old.Close()
 	}
+	// lifeMu is held throughout, so a Stop waits for this to finish (a
+	// second or so) and then ends what it started.
 	e, core, err := engine.StartMobile(prof, settings, vpn, logFile, newPlatform(app))
 	runMu.Lock()
 	defer runMu.Unlock()
-	if monitorStop != stop { // stopped meanwhile
-		if e != nil {
-			e.Close()
-		}
-		return errGone
-	}
 	if err != nil {
 		runErr = err.Error()
 		return err
 	}
-	running, session = e, newSession(prof, settings, core, e)
+	running, session = e, newSession(prof, settings, vpn, core, e)
 	runState, runErr, healthErr, healthMS = "connected", "", "", 0
 	return nil
 }

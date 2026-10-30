@@ -5,8 +5,11 @@ import (
 	"errors"
 	"net"
 	"strconv"
+	"strings"
 	"testing"
 	"time"
+
+	"github.com/khaliilii/MKConnect/internal/profile"
 )
 
 // statusOf returns the state the app polls, failing if it takes long: the
@@ -141,5 +144,21 @@ func TestReconnectRetriesAndStops(t *testing.T) {
 	}
 	if s := statusOf(t); s["state"] != "idle" {
 		t.Errorf("a reconnect after Stop changed the state: %v", s)
+	}
+}
+
+// TestSessionShowsHowThePhoneRuns: the connection's description follows the
+// phone's mode and the core that carries it, not the stored desktop settings.
+func TestSessionShowsHowThePhoneRuns(t *testing.T) {
+	p := profile.Profile{Name: "a", Type: profile.TypeVLESS, Server: "h", Port: 443}
+	stored := profile.DefaultSettings() // proxy mode, sing-box
+	stored.ShareInterfaces = []string{"en0"}
+	vpn := newSession(p, stored, true, profile.CoreXray, nil)
+	if vpn.Core != profile.CoreXray || len(vpn.Inbounds) != 2 || !strings.HasPrefix(vpn.Inbounds[1], "TUN ") {
+		t.Errorf("VPN mode: %+v", vpn)
+	}
+	stored.Mode = profile.ModeTUN
+	if proxy := newSession(p, stored, false, profile.CoreSingBox, nil); len(proxy.Inbounds) != 1 {
+		t.Errorf("proxy mode: %+v", proxy)
 	}
 }

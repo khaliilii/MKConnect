@@ -109,7 +109,7 @@ class MainActivity : ComponentActivity() {
                     connection = Connection(
                         connect = ::connect,
                         disconnect = { MkVpnService.stop(this) },
-                        switch = { vpn -> MkVpnService.switch(this, vpn) },
+                        switch = ::switchAccount,
                     ),
                     clipboardText = ::clipboardText,
                     openUrl = { startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(it))) },
@@ -129,6 +129,16 @@ class MainActivity : ComponentActivity() {
         } else {
             pendingVpnStart = true
             vpnPermission.launch(prepare)
+        }
+    }
+
+    /** Reconnects with the account now selected; VPN mode may need the permission first. */
+    private fun switchAccount(vpn: Boolean) {
+        if (vpn && VpnService.prepare(this) != null) {
+            MkVpnService.stop(this)
+            connect(vpn = true)
+        } else {
+            MkVpnService.switch(this, vpn)
         }
     }
 

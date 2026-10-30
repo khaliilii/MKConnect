@@ -34,6 +34,7 @@ import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -46,6 +47,7 @@ import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
+import kotlinx.coroutines.delay
 
 // Small building blocks the forms are made of, so every screen looks the same
 // and the account editor stays readable.
@@ -75,20 +77,22 @@ fun Field(
 
 /**
  * A number setting: the text is the field's own while it is typed (it may be
- * empty or out of range for a moment), and a number is passed on once it is
- * valid; until then the field says what it takes.
+ * empty or out of range for a moment), and a valid number is passed on once
+ * typing pauses, not every digit on the way (port 1, 10, 108 for 1080);
+ * until it is valid the field says what it takes.
  */
 @Composable
 fun NumberField(label: String, value: Int, valid: (Int) -> Boolean, rule: String, onChange: (Int) -> Unit) {
     var text by remember(value) { mutableStateOf(value.toString()) }
     val n = text.toIntOrNull()
     val ok = n != null && valid(n)
+    LaunchedEffect(text) {
+        delay(800)
+        if (n != null && ok && n != value) onChange(n)
+    }
     OutlinedTextField(
         value = text,
-        onValueChange = {
-            text = it.filter(Char::isDigit).take(5)
-            text.toIntOrNull()?.let { v -> if (valid(v) && v != value) onChange(v) }
-        },
+        onValueChange = { text = it.filter(Char::isDigit).take(5) },
         label = { Text(label) },
         isError = !ok,
         supportingText = if (ok) null else ({ Text(rule) }),

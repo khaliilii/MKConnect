@@ -365,7 +365,12 @@ func writesTo(w io.Writer, f *os.File) bool {
 // Serve is the privileged helper: it runs requests until told to quit or
 // until the app that started it exits. A request without an app to watch
 // (parent pid 0) is run once.
-func Serve(dir string) error {
+func Serve(dir string) error { return serve(dir, false) }
+
+// serve is Serve; with resume (a helper started again after a crash) it
+// first runs the request the crashed one was running, unless the app has
+// asked to stop it meanwhile.
+func serve(dir string, resume bool) error {
 	if err := checkDir(dir); err != nil {
 		return err
 	}
@@ -390,8 +395,10 @@ func Serve(dir string) error {
 	st.set(func(s *status) { s.State = stateIdle })
 	lastSeq := 0
 	for {
-		// Wait for a request to run.
-		if !once {
+		if resume && req.Seq > lastSeq && !exists("stop") {
+			log.Printf("🔁 resuming the connection after a crash")
+		} else if !once {
+			// Wait for a request to run.
 			for !exists("start") {
 				if gone() {
 					log.Printf("MKConnect exited; helper done")
@@ -409,6 +416,7 @@ func Serve(dir string) error {
 				continue // already handled
 			}
 		}
+		resume = false
 		lastSeq = req.Seq
 		err := serveOne(dir, st, req, gone)
 		if once {

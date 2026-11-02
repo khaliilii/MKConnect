@@ -17,7 +17,7 @@ var icon []byte
 func main() {
 	// Started by the app itself, with administrator rights, to run TUN mode.
 	if len(os.Args) == 3 && os.Args[1] == elevate.HelperFlag {
-		if err := elevate.Serve(os.Args[2]); err != nil {
+		if err := elevate.Supervise(os.Args[2]); err != nil {
 			fmt.Fprintln(os.Stderr, err)
 			os.Exit(1)
 		}

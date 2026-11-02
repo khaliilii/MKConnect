@@ -32,3 +32,11 @@ func checkDir(dir string) error {
 	}
 	return nil
 }
+
+// detach takes the helper out of the process group it was started in. On
+// macOS that is the group of authtrampoline, which runs commands with
+// administrator rights: macOS ends it as an idle process when memory runs
+// low, and launchd then kills the rest of its group, the helper included —
+// the connection dropped without a trace, and a new helper asked for the
+// password again.
+func detach() { syscall.Setsid() }

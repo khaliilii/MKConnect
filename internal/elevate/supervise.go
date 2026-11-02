@@ -54,6 +54,7 @@ func Supervise(dir string) error {
 	if os.Getenv(workerEnv) != "" {
 		return serve(dir, os.Getenv(resumeEnv) != "")
 	}
+	detach()
 	if err := checkDir(dir); err != nil {
 		return err
 	}

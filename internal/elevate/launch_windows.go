@@ -39,3 +39,7 @@ func processAlive(pid int) bool {
 // checkDir: the directory comes from the unelevated app's temp folder, which
 // only that user can write to on Windows.
 func checkDir(dir string) error { return nil }
+
+// detach does nothing on Windows: the elevated process doesn't belong to its
+// launcher's job (see the Unix detach).
+func detach() {}

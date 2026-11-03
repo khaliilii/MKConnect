@@ -222,7 +222,7 @@ fun ImportDialog(onClose: () -> Unit, onNewAccount: () -> Unit, onImport: (Strin
                     hint = "vmess://, vless://, trojan://, ss://, hy2://, tuic://, ssh:// or an https:// subscription",
                     lines = 4,
                 )
-                Field("Group (optional)", group, { group = it }, hint = "new or existing group name")
+                Field("Name or group (optional)", group, { group = it }, hint = "a subscription's name, or a group for links")
                 Hint("Several links at once are fine, in any surrounding text or base64; duplicates are skipped.")
                 TextButton(onNewAccount) { Text("Add an account by hand instead") }
             }
@@ -241,6 +241,32 @@ fun PromptDialog(title: String, label: String, initial: String, onClose: () -> U
         title = { Text(title) },
         text = { Field(label, text, { text = it }) },
         confirmButton = { TextButton({ onDone(text.trim()); onClose() }, enabled = text.isNotBlank()) { Text("OK") } },
+        dismissButton = { TextButton(onClose) { Text("Cancel") } },
+    )
+}
+
+/** A subscription's name and link, to change either. */
+@Composable
+fun SubscriptionDialog(group: Group, onClose: () -> Unit, onSave: (name: String, url: String) -> Unit) {
+    var name by remember { mutableStateOf(group.name) }
+    var url by remember { mutableStateOf(group.url) }
+    val validUrl = url.trim().let { it.startsWith("https://") || it.startsWith("http://") } && !url.trim().contains(' ')
+    AlertDialog(
+        onDismissRequest = onClose,
+        title = { Text("Subscription") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                Field("Name", name, { name = it })
+                Field("Link", url, { url = it }, hint = "https://…", lines = 3)
+                Hint(
+                    if (url.trim() != group.url) "The new link is fetched when you save: its accounts replace this subscription's."
+                    else "${group.count} account(s)."
+                )
+            }
+        },
+        confirmButton = {
+            TextButton({ onSave(name.trim(), url.trim()); onClose() }, enabled = name.isNotBlank() && validUrl) { Text("Save") }
+        },
         dismissButton = { TextButton(onClose) { Text("Cancel") } },
     )
 }

@@ -2,6 +2,9 @@ package mkmobile
 
 import (
 	"encoding/json"
+	"fmt"
+	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
 	"time"
@@ -125,6 +128,51 @@ func TestGroupsFromPhone(t *testing.T) {
 	}
 	if err := SetGroup(first["id"].(string), ""); err != nil {
 		t.Fatal(err)
+	}
+}
+
+// TestSubscriptionNameAndAddress: a subscription imported with a name keeps
+// that name and its accounts (not a separate group of copies), and its name
+// and address can be changed afterwards; a local group has no address.
+func TestSubscriptionNameAndAddress(t *testing.T) {
+	newTestStore(t)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		fmt.Fprint(w, "trojan://pw@a.example:443#one\ntrojan://pw@b.example:443#two")
+	}))
+	defer srv.Close()
+
+	if _, err := ImportInto(srv.URL+"/sub", "My provider"); err != nil {
+		t.Fatal(err)
+	}
+	groups := profilesOf(t)["groups"].([]any)
+	if len(groups) != 1 {
+		t.Fatalf("groups %v, want the subscription alone", groups)
+	}
+	g := groups[0].(map[string]any)
+	if g["name"] != "My provider" || g["url"] != srv.URL+"/sub" || g["count"].(float64) != 2 {
+		t.Fatalf("subscription %v", g)
+	}
+	id := g["id"].(string)
+
+	if err := EditSubscription(id, " Renamed ", srv.URL+"/other"); err != nil {
+		t.Fatal(err)
+	}
+	g = profilesOf(t)["groups"].([]any)[0].(map[string]any)
+	if g["name"] != "Renamed" || g["url"] != srv.URL+"/other" {
+		t.Fatalf("after the edit: %v", g)
+	}
+	if n, err := UpdateSubscriptions(); n != 1 || err != nil {
+		t.Errorf("update from the new address: %d, %v", n, err)
+	}
+
+	for _, bad := range []struct{ name, url string }{{"", srv.URL}, {"x", "ftp://a"}, {"x", "not a url"}} {
+		if err := EditSubscription(id, bad.name, bad.url); err == nil {
+			t.Errorf("accepted name %q, address %q", bad.name, bad.url)
+		}
+	}
+	local, _ := AddGroup("Mine")
+	if err := EditSubscription(local, "Mine", srv.URL); err == nil {
+		t.Error("gave a local group an address")
 	}
 }
 

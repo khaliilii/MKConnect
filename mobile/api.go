@@ -129,9 +129,8 @@ func summary(p *profile.Profile) string {
 // text, or base64), skipping duplicates. A subscription URL becomes a group and
 // is downloaded. Returns {"added", "existing", "skipped": [...]} as JSON.
 func Import(text string) (string, error) {
-	text = strings.TrimSpace(text)
-	if !strings.ContainsAny(text, " \n") && (strings.HasPrefix(text, "http://") || strings.HasPrefix(text, "https://")) {
-		return addSubscription(text)
+	if url, ok := subscriptionURL(text); ok {
+		return addSubscription(url, "")
 	}
 	mu.Lock()
 	defer mu.Unlock()
@@ -173,7 +172,17 @@ type importResult struct {
 	Skipped  []string `json:"skipped"`
 }
 
-func addSubscription(url string) (string, error) {
+// subscriptionURL reports whether text is a subscription's address (one
+// http(s) URL, nothing else).
+func subscriptionURL(text string) (string, bool) {
+	text = strings.TrimSpace(text)
+	ok := !strings.ContainsAny(text, " \n\t") && (strings.HasPrefix(text, "http://") || strings.HasPrefix(text, "https://"))
+	return text, ok
+}
+
+// addSubscription adds the subscription at url, named name ("": the name
+// its provider gives it, or its address's host).
+func addSubscription(url, name string) (string, error) {
 	data, err := profile.FetchSubscriptionVia(url, fetchProxy()) // network: outside the lock
 	if err != nil {
 		return "", err
@@ -184,7 +193,7 @@ func addSubscription(url string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	g := s.AddGroup("", url)
+	g := s.AddGroup(name, url)
 	n, errs := s.ApplySubscription(g, data, time.Now())
 	res := importResult{Added: n, Skipped: []string{}}
 	for _, e := range errs {

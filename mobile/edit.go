@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/khaliilii/MKConnect/internal/engine"
 	"github.com/khaliilii/MKConnect/internal/profile"
@@ -158,6 +159,11 @@ func ImportInto(text, group string) (string, error) {
 	if group == "" {
 		return Import(text)
 	}
+	if url, ok := subscriptionURL(text); ok {
+		// The name is the subscription's own: its accounts stay in it, so
+		// an update still finds them.
+		return addSubscription(url, group)
+	}
 	before := map[string]bool{}
 	mu.Lock()
 	s, err := loaded()
@@ -196,4 +202,34 @@ func ImportInto(text, group string) (string, error) {
 		return "", fmt.Errorf("save: %w", err)
 	}
 	return out, nil
+}
+
+// EditSubscription changes a subscription's name and address. The accounts
+// stay until the next update, which fetches them from the new address.
+func EditSubscription(id, name, url string) error {
+	name, url = strings.TrimSpace(name), strings.TrimSpace(url)
+	if name == "" {
+		return errors.New("the subscription needs a name")
+	}
+	if _, ok := subscriptionURL(url); !ok {
+		return errors.New("the subscription address must start with http:// or https://")
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	s, err := loaded()
+	if err != nil {
+		return err
+	}
+	g, err := s.FindGroup(id)
+	if err != nil {
+		return err
+	}
+	if !g.IsSubscription() {
+		return fmt.Errorf("%s is a group, not a subscription", g.Name)
+	}
+	if g.URL != url {
+		g.URL, g.UpdatedAt, g.Usage = url, time.Time{}, nil // due for an update
+	}
+	g.Name = name
+	return s.Save()
 }

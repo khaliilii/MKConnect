@@ -12,12 +12,17 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.Cancel
+import androidx.compose.material.icons.filled.CheckCircle
+import androidx.compose.material.icons.filled.Error
+import androidx.compose.material.icons.outlined.Circle
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.ContentPaste
 import androidx.compose.material.icons.filled.MoreVert
@@ -46,6 +51,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
@@ -79,6 +85,8 @@ data class AccountsCallbacks(
     val newGroup: () -> Unit,
     val renameGroup: (Group) -> Unit,
     val deleteGroup: (Group) -> Unit,
+    val editSubscription: (Group) -> Unit,
+    val copySubscriptionLink: (Group) -> Unit,
 )
 
 // Group filter values besides a group id.
@@ -109,8 +117,10 @@ fun AccountsScreen(
                 else -> a.group == groupFilter
             }
     }
-    val usage = accounts.groups.filter {
-        it.isSubscription && it.usedText.isNotEmpty() && (groupFilter == ALL || groupFilter == it.id)
+    // Every subscription has its card (its link, usage, update and edit),
+    // whether or not its provider reports the usage.
+    val subscriptions = accounts.groups.filter {
+        it.isSubscription && (groupFilter == ALL || groupFilter == it.id)
     }
     val busy = rankStage.isNotEmpty() || test.running
 
@@ -148,8 +158,8 @@ fun AccountsScreen(
                     GroupChips(accounts, groupFilter) { groupFilter = it }
                 }
             }
-            items(usage, key = { "usage-" + it.id }) { g ->
-                UsageCard(g, on.updateSubscriptions, on.renameGroup) { deletingGroup = g }
+            items(subscriptions, key = { "sub-" + it.id }) { g ->
+                SubscriptionCard(g, on) { deletingGroup = g }
             }
             if (shown.isEmpty()) {
                 item(key = "empty") { EmptyAccounts(accounts.list.isEmpty(), on) }
@@ -270,17 +280,27 @@ private fun GroupChips(accounts: Accounts, filter: String, onFilter: (String) ->
 }
 
 @Composable
-private fun UsageCard(g: Group, onUpdate: () -> Unit, onRename: (Group) -> Unit, onDelete: () -> Unit) {
+private fun SubscriptionCard(g: Group, on: AccountsCallbacks, onDelete: () -> Unit) {
     var menu by remember { mutableStateOf(false) }
     Card(Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 4.dp)) {
         Column(Modifier.padding(start = 16.dp, end = 4.dp, top = 4.dp, bottom = 12.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
-                Text(g.name, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
-                IconButton(onUpdate) { Icon(Icons.Filled.Refresh, "Update subscription") }
+                Column(Modifier.weight(1f)) {
+                    Text(g.name, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    Text(
+                        g.url,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                }
+                IconButton(on.updateSubscriptions) { Icon(Icons.Filled.Refresh, "Update subscription") }
                 Box {
                     IconButton({ menu = true }) { Icon(Icons.Filled.MoreVert, "Subscription actions") }
                     DropdownMenu(menu, { menu = false }) {
-                        DropdownMenuItem(text = { Text("Rename") }, onClick = { menu = false; onRename(g) })
+                        DropdownMenuItem(text = { Text("Edit name & link…") }, onClick = { menu = false; on.editSubscription(g) })
+                        DropdownMenuItem(text = { Text("Copy link") }, onClick = { menu = false; on.copySubscriptionLink(g) })
                         DropdownMenuItem(text = { Text("Delete with its accounts") }, onClick = { menu = false; onDelete() })
                     }
                 }
@@ -291,7 +311,8 @@ private fun UsageCard(g: Group, onUpdate: () -> Unit, onRename: (Group) -> Unit,
                     modifier = Modifier.fillMaxWidth().padding(end = 12.dp, bottom = 6.dp),
                 )
             }
-            Text("${g.usedText} · ${g.count} accounts", style = MaterialTheme.typography.bodySmall)
+            val usage = if (g.usedText.isNotEmpty()) "${g.usedText} · " else ""
+            Text("$usage${g.count} accounts", style = MaterialTheme.typography.bodySmall)
         }
     }
 }
@@ -322,6 +343,25 @@ private fun EmptyAccounts(noAccounts: Boolean, on: AccountsCallbacks) {
     }
 }
 
+/**
+ * Whether an account connects, at a glance, from its last test: green it
+ * works, amber some sites didn't open, red it doesn't connect, grey not
+ * tested yet.
+ */
+@Composable
+private fun StatusIcon(measured: String) {
+    val dark = MaterialTheme.colorScheme.background.luminance() < 0.5f
+    val (icon, tint, what) = when {
+        measured.isEmpty() -> Triple(Icons.Outlined.Circle, MaterialTheme.colorScheme.outline, "Not tested")
+        else -> when (measuredOf(measured)) {
+            Measured.OK -> Triple(Icons.Filled.CheckCircle, if (dark) Color(0xFF81C784) else Color(0xFF2E7D32), "Works")
+            Measured.PARTLY -> Triple(Icons.Filled.Error, if (dark) Color(0xFFFFB74D) else Color(0xFFE65100), "Works, some sites don't open")
+            Measured.FAILED -> Triple(Icons.Filled.Cancel, MaterialTheme.colorScheme.error, "Doesn't connect")
+        }
+    }
+    Icon(icon, what, tint = tint, modifier = Modifier.size(16.dp))
+}
+
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
 private fun AccountRow(
@@ -343,7 +383,11 @@ private fun AccountRow(
     ) {
         RadioButton(selected, { actions.select(account) })
         Column(Modifier.weight(1f).padding(vertical = 4.dp), verticalArrangement = Arrangement.spacedBy(2.dp)) {
-            Text(account.name, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                StatusIcon(measured)
+                Spacer(Modifier.width(6.dp))
+                Text(account.name, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            }
             Text(
                 account.summary,
                 style = MaterialTheme.typography.bodySmall,

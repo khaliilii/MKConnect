@@ -191,6 +191,7 @@ fun App(connection: Connection, clipboardText: () -> String, openUrl: (String) -
     var showImport by remember { mutableStateOf(false) }
     var newGroup by remember { mutableStateOf(false) }
     var renaming by remember { mutableStateOf<Group?>(null) }
+    var editingSubscription by remember { mutableStateOf<Group?>(null) }
     var moving by remember { mutableStateOf<Account?>(null) }
     var rankStage by remember { mutableStateOf("") } // "" unless Update & test is updating
     val options = remember { Options.load() }
@@ -322,6 +323,8 @@ fun App(connection: Connection, clipboardText: () -> String, openUrl: (String) -
         newGroup = { newGroup = true },
         renameGroup = { g -> renaming = g },
         deleteGroup = { g -> core { Mkmobile.deleteGroup(g.id) } },
+        editSubscription = { g -> editingSubscription = g },
+        copySubscriptionLink = { g -> clipboard.setText(AnnotatedString(g.url)); notify("Subscription link copied.") },
     )
 
     val selectedName = accounts.list.firstOrNull { it.id == accounts.active }?.name.orEmpty()
@@ -416,6 +419,13 @@ fun App(connection: Connection, clipboardText: () -> String, openUrl: (String) -
     }
     renaming?.let { g ->
         PromptDialog("Rename group", "Name", g.name, onClose = { renaming = null }) { name -> core { Mkmobile.renameGroup(g.id, name) } }
+    }
+    editingSubscription?.let { g ->
+        SubscriptionDialog(g, onClose = { editingSubscription = null }) { name, url ->
+            val saved = runCatching { Mkmobile.editSubscription(g.id, name, url) }.onFailure { error = it.message }.isSuccess
+            refresh()
+            if (saved && url != g.url) updateSubscriptions() // the accounts of the new link
+        }
     }
     moving?.let { a ->
         GroupPickerDialog(accounts.groups, onClose = { moving = null }) { groupId -> core { Mkmobile.setGroup(a.id, groupId) } }

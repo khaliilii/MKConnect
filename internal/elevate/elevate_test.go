@@ -208,3 +208,69 @@ func TestPublicDirRejected(t *testing.T) {
 		t.Fatal("world-writable helper directory accepted")
 	}
 }
+
+// TestAwakeClockSkipsSleep: the time a Mac sleeps doesn't count as time the
+// helper failed to report.
+func TestAwakeClockSkipsSleep(t *testing.T) {
+	old := wallNow
+	defer func() { wallNow = old }()
+	now := time.Date(2026, 11, 3, 7, 16, 50, 0, time.UTC)
+	wallNow = func() time.Time { return now }
+	var c awakeClock
+	c.tick()
+	now = now.Add(300 * time.Millisecond)
+	c.tick()
+	now = now.Add(127 * time.Second) // asleep
+	if got := c.tick(); got != 300*time.Millisecond+pollInterval {
+		t.Fatalf("awake %s after a sleep, want %s", got, 300*time.Millisecond+pollInterval)
+	}
+}
+
+// TestStaleHelperStartsOver: a helper that stops reporting but still runs is
+// asked to start the connection over, not given up: the next connection uses
+// it again, without a new password prompt.
+func TestStaleHelperStartsOver(t *testing.T) {
+	oldLaunch, oldStale := launch, staleAfter
+	defer func() { launch, staleAfter = oldLaunch, oldStale; Shutdown() }()
+	staleAfter = 600 * time.Millisecond
+	launches := 0
+	launch = func(_, dir string) (<-chan error, error) {
+		launches++
+		go fakeHelper(dir)
+		return nil, nil
+	}
+	p, s := testRequest(t)
+	for i := range 2 {
+		started := false
+		err := Run(context.Background(), p, s, engine.Hooks{OnStarted: func(*engine.Session) { started = true }})
+		if !errors.Is(err, errStale) || !started {
+			t.Fatalf("run %d: %v (started %t)", i+1, err, started)
+		}
+	}
+	if launches != 1 {
+		t.Fatalf("the helper was started %d times, want 1", launches)
+	}
+}
+
+// fakeHelper runs requests like the helper, but reports once per request and
+// then never again (as if it hung), until asked to stop.
+func fakeHelper(dir string) {
+	st := &statusWriter{dir: dir, pid: os.Getpid()}
+	st.set(func(s *status) { s.State = stateIdle })
+	at := func(name string) bool { _, err := os.Stat(filepath.Join(dir, name)); return err == nil }
+	for !at("quit") {
+		if !at("start") {
+			time.Sleep(20 * time.Millisecond)
+			continue
+		}
+		os.Remove(filepath.Join(dir, "start"))
+		req, _ := readRequest(dir)
+		st.set(func(s *status) { *s = status{State: stateRunning, Seq: req.Seq} })
+		for !at("stop") && !at("quit") {
+			time.Sleep(20 * time.Millisecond)
+		}
+		os.Remove(filepath.Join(dir, "stop"))
+		st.set(func(s *status) { s.State = stateStopped })
+	}
+	st.set(func(s *status) { s.State = stateExited })
+}

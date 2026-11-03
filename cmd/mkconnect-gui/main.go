@@ -9,6 +9,7 @@ import (
 	"github.com/khaliilii/MKConnect/internal/elevate"
 	"github.com/khaliilii/MKConnect/internal/engine"
 	"github.com/khaliilii/MKConnect/internal/gui"
+	"github.com/khaliilii/MKConnect/internal/killswitch"
 )
 
 //go:embed Icon.png
@@ -31,6 +32,15 @@ func main() {
 			fmt.Println("restored:", c)
 		}
 		if err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			os.Exit(1)
+		}
+		return
+	}
+	// Started by the app, with administrator rights, to remove a kill
+	// switch an interrupted connection left.
+	if len(os.Args) == 2 && os.Args[1] == gui.RemoveKillSwitchFlag {
+		if _, err := killswitch.Cleanup(); err != nil {
 			fmt.Fprintln(os.Stderr, err)
 			os.Exit(1)
 		}

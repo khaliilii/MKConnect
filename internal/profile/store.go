@@ -87,6 +87,11 @@ type Settings struct {
 	// which these tunnels carry far better. On by default.
 	BlockQUIC bool `json:"block_quic"`
 
+	// KillSwitch blocks the internet in TUN mode whenever the tunnel is down
+	// (a drop, a reconnect, a crash), until it is back or the user
+	// disconnects: no app's traffic leaves without it. Off by default.
+	KillSwitch bool `json:"kill_switch,omitempty"`
+
 	// TestSites are the websites the account test opens through each
 	// account (see engine.Test), as the user typed them: "linkedin.com" or a
 	// full address. Empty skips the site check.

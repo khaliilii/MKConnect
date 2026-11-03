@@ -14,6 +14,7 @@
 //	status.json   helper → app  state, sequence, session info, traffic counters
 //	helper.log    helper → app  core logs
 //	stop          app → helper  disconnect
+//	release       app → helper  lift the kill switch (the user ended the connection)
 //	quit          app → helper  exit
 //
 // The helper also exits on its own when the app process goes away.
@@ -135,21 +136,27 @@ func Run(ctx context.Context, p profile.Profile, s profile.Settings, hooks engin
 		st         status
 		started    bool
 		lastHealth int
-		begin      = time.Now()
-		stopAt     time.Time
+		clock      awakeClock
+		stopAt     time.Duration // on clock; 0: no stop asked
+		seenAt     time.Duration // when the helper last reported, on clock
+		seen       time.Time     // its last report
+		stale      bool          // it stopped reporting and was asked to start over
 	)
-	stop := func() {
-		if stopAt.IsZero() {
+	stop := func(now time.Duration) {
+		if stopAt == 0 {
 			os.WriteFile(filepath.Join(dir, "stop"), nil, 0o600)
-			stopAt = time.Now()
+			stopAt = now
 		}
 	}
 	tick := time.NewTicker(pollInterval)
 	defer tick.Stop()
+	cancelled := ctx.Done()
 	for {
+		now := clock.tick()
 		select {
-		case <-ctx.Done():
-			stop()
+		case <-cancelled:
+			cancelled = nil // asked once; wait for the helper
+			stop(now)
 		case err := <-h.exited:
 			markDead(h)
 			if errors.Is(err, ErrDenied) {
@@ -163,6 +170,9 @@ func Run(ctx context.Context, p profile.Profile, s profile.Settings, hooks engin
 
 		if cur, err := readStatus(dir); err == nil && cur.Seq == seq {
 			st = cur
+		}
+		if !st.Updated.Equal(seen) {
+			seen, seenAt = st.Updated, now
 		}
 		if st.HealthSeq > lastHealth && hooks.OnHealth != nil {
 			lastHealth = st.HealthSeq
@@ -187,23 +197,68 @@ func Run(ctx context.Context, p profile.Profile, s profile.Settings, hooks engin
 				}
 			}
 		case stateStopped:
+			if stale {
+				return errStale
+			}
 			return nil
 		case stateError:
 			return errors.New(st.Error)
 		}
 
 		switch {
-		case !stopAt.IsZero() && time.Since(stopAt) > 10*time.Second:
+		case stopAt > 0 && now-stopAt > 10*time.Second:
 			markDead(h)
+			if stale {
+				return errStale
+			}
 			return fmt.Errorf("the TUN helper didn't stop in time")
-		case st.State == "" && time.Now().After(begin.Add(startTimeout)):
+		case st.State == "" && now > startTimeout:
 			markDead(h)
 			return fmt.Errorf("the TUN helper didn't respond")
-		case started && time.Since(st.Updated) > 10*time.Second:
-			markDead(h)
-			return fmt.Errorf("the TUN helper stopped responding")
+		case started && stopAt == 0 && now-seenAt > staleAfter:
+			// Still there, it gets to start over: a new helper would need the
+			// password again, and couldn't open a tunnel while this one has one.
+			log.Printf("⚠️  the TUN helper hasn't reported for %s; restarting the connection", (now - seenAt).Round(time.Second))
+			stale = true
+			stop(now)
 		}
 	}
+}
+
+var errStale = errors.New("the TUN helper stopped responding")
+
+// staleAfter is how long a running helper may go without reporting; a
+// variable so tests don't have to wait.
+var staleAfter = 10 * time.Second
+
+// awakeClock measures the time the system has been awake since the first
+// tick. A sleep stops the helper as much as the app: counted, it would make
+// every connection look dead the moment the Mac wakes up. A gap between two
+// ticks far longer than the poll interval is such a sleep (or the app was
+// suspended), and counts as one interval.
+type awakeClock struct {
+	last    time.Time
+	elapsed time.Duration
+}
+
+// sleepGap is the longest gap between ticks taken as time awake.
+const sleepGap = 5 * time.Second
+
+// wallNow is the wall clock, which goes on during a sleep (unlike Go's
+// monotonic one on macOS); replaced in tests.
+var wallNow = func() time.Time { return time.Now().Round(0) }
+
+func (c *awakeClock) tick() time.Duration {
+	now := wallNow()
+	if !c.last.IsZero() {
+		d := now.Sub(c.last)
+		if d > sleepGap || d < 0 {
+			d = pollInterval
+		}
+		c.elapsed += d
+	}
+	c.last = now
+	return c.elapsed
 }
 
 // acquire returns the running helper, or starts one (permission prompt).
@@ -261,12 +316,29 @@ func acquire() (*helper, error) {
 	}
 }
 
+// markDead gives a helper up. One that is still running is told to quit,
+// so it doesn't keep a tunnel (and a kill switch) the next one can't replace.
 func markDead(h *helper) {
+	os.WriteFile(filepath.Join(h.dir, "quit"), nil, 0o600)
 	mu.Lock()
 	defer mu.Unlock()
 	h.dead = true
 	if current == h {
 		current = nil
+	}
+}
+
+// releaseKillSwitch lifts the kill switch the helper holds; replaced in tests.
+var releaseKillSwitch = engine.ReleaseKillSwitch
+
+// ReleaseKillSwitch has the helper lift the kill switch, if it holds one:
+// the user ended the connection. The helper does it before its next request.
+func ReleaseKillSwitch() {
+	mu.Lock()
+	h := current
+	mu.Unlock()
+	if h != nil {
+		os.WriteFile(filepath.Join(h.dir, "release"), nil, 0o600)
 	}
 }
 
@@ -392,14 +464,26 @@ func serve(dir string, resume bool) error {
 	exists := func(name string) bool { _, err := os.Stat(filepath.Join(dir, name)); return err == nil }
 	gone := func() bool { return exists("quit") || (parent > 0 && !processAlive(parent)) }
 
+	// A kill switch outlives the connection that engaged it (a drop leaves
+	// the block for the reconnect); it ends with the app's connection.
+	defer releaseKillSwitch()
+
 	st.set(func(s *status) { s.State = stateIdle })
 	lastSeq := 0
 	for {
 		if resume && req.Seq > lastSeq && !exists("stop") {
 			log.Printf("🔁 resuming the connection after a crash")
 		} else if !once {
-			// Wait for a request to run.
-			for !exists("start") {
+			// Wait for a request to run. A release the app wrote before it
+			// (it ended one connection and started the next) comes first.
+			for {
+				if exists("release") {
+					os.Remove(filepath.Join(dir, "release"))
+					releaseKillSwitch()
+				}
+				if exists("start") {
+					break
+				}
 				if gone() {
 					log.Printf("MKConnect exited; helper done")
 					st.set(func(s *status) { s.State = stateExited })
@@ -430,6 +514,9 @@ func serveOne(dir string, st *statusWriter, req request, gone func() bool) error
 	seq := req.Seq
 	if req.Settings.Core == profile.CoreExternal {
 		return st.fail(seq, errors.New("refusing to run an external core binary as root"))
+	}
+	if !req.Settings.KillSwitch || req.Settings.Mode != profile.ModeTUN {
+		releaseKillSwitch() // turned off since the last connection
 	}
 	os.Remove(filepath.Join(dir, "stop"))
 	st.set(func(s *status) { *s = status{State: stateStarting, Seq: seq, PID: s.PID} })

@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/khaliilii/MKConnect/internal/gateway"
+	"github.com/khaliilii/MKConnect/internal/killswitch"
 	"github.com/khaliilii/MKConnect/internal/profile"
 	"github.com/khaliilii/MKConnect/internal/recovery"
 )
@@ -74,6 +75,11 @@ func Run(ctx context.Context, p profile.Profile, s profile.Settings, hooks Hooks
 		} else if len(cleaned) > 0 {
 			log.Printf("🧹 cleaned up after an earlier crash: %s", strings.Join(cleaned, ", "))
 		}
+		if left, err := killswitch.Cleanup(); err != nil {
+			log.Printf("⚠️  removing a kill switch an earlier connection left: %v", err)
+		} else if left {
+			log.Printf("🧹 removed the kill switch an earlier connection left")
+		}
 		if err := checkOtherVPN(); err != nil {
 			return err
 		}
@@ -99,6 +105,16 @@ func Run(ctx context.Context, p profile.Profile, s profile.Settings, hooks Hooks
 		// Runs after the cores have closed (defers run in reverse order).
 		defer flushDNSCache("the tunnel is down: its answers are no use without it")
 	}
+	guarded, err := killSwitchFor(&s)
+	if err != nil {
+		return err
+	}
+	if guarded {
+		// Before the cores: their sockets must be the ones it lets out.
+		if err := engageKillSwitch(""); err != nil {
+			return err
+		}
+	}
 	shown := p // start may pin the server to an IP; show what the user configured
 	engines, err := start(ctx, &p, &s)
 	defer func() {
@@ -110,6 +126,15 @@ func Run(ctx context.Context, p profile.Profile, s profile.Settings, hooks Hooks
 	}()
 	if err != nil {
 		return err
+	}
+	if guarded {
+		tun, err := tunInterface(&s)
+		if err == nil {
+			err = engageKillSwitch(tun)
+		}
+		if err != nil {
+			return err
+		}
 	}
 
 	if share {

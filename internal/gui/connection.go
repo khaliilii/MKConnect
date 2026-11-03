@@ -60,6 +60,12 @@ func (u *ui) newConnectionPanel() fyne.CanvasObject {
 	mode.Horizontal = true
 	mode.Required = true
 	mode.SetSelected(labelFor(modeValues, modeLabels, s.Mode))
+	killSwitch := widget.NewCheck("Kill switch: block the internet whenever the tunnel is down (TUN mode)", nil)
+	killSwitch.SetChecked(s.KillSwitch)
+	killSwitchHint := widget.NewLabel(killSwitchHint())
+	killSwitchHint.Wrapping = fyne.TextWrapWord
+	killSwitchHint.Importance = widget.LowImportance
+	killSwitchHint.SizeName = theme.SizeNameCaptionText
 	tunWarning := widget.NewLabel(tunPrivilegeHint())
 	tunWarning.Wrapping = fyne.TextWrapWord
 	tunWarning.Importance = widget.LowImportance
@@ -123,6 +129,8 @@ func (u *ui) newConnectionPanel() fyne.CanvasObject {
 		form.setVisible(extBox, s.Core == profile.CoreExternal)
 		form.setVisible(tunWarning, s.Mode == profile.ModeTUN && !isElevated())
 		form.setVisible(shareBox, s.Mode == profile.ModeTUN && !isMobile)
+		form.setVisible(killSwitch, s.Mode == profile.ModeTUN && !isMobile)
+		form.setVisible(killSwitchHint, s.Mode == profile.ModeTUN && !isMobile && s.KillSwitch)
 		form.setVisible(fakeDNS, s.Mode == profile.ModeTUN)
 		form.setVisible(blockQUIC, s.Mode == profile.ModeTUN)
 		form.setVisible(failover, s.AutoReconnect)
@@ -150,6 +158,7 @@ func (u *ui) newConnectionPanel() fyne.CanvasObject {
 		s.Mux = mux.Checked
 		s.FakeDNS = fakeDNS.Checked
 		s.BlockQUIC = blockQUIC.Checked
+		s.KillSwitch = killSwitch.Checked
 		updateVisibility()
 		u.save()
 	}
@@ -165,6 +174,7 @@ func (u *ui) newConnectionPanel() fyne.CanvasObject {
 	mux.OnChanged = func(bool) { changed() }
 	fakeDNS.OnChanged = func(bool) { changed() }
 	blockQUIC.OnChanged = func(bool) { changed() }
+	killSwitch.OnChanged = func(bool) { changed() }
 	share.OnChanged = func(labels []string) {
 		if runtime.GOOS == "windows" && len(labels) > 1 {
 			// Internet Connection Sharing supports one adapter: keep the newest choice.
@@ -186,6 +196,8 @@ func (u *ui) newConnectionPanel() fyne.CanvasObject {
 		{Text: "", Widget: extBox},
 		{Text: "Mode", Widget: mode},
 		{Text: "", Widget: tunWarning},
+		{Text: "", Widget: killSwitch},
+		{Text: "", Widget: killSwitchHint},
 		{Text: "Share with", Widget: shareBox},
 		{Text: "Local port", Widget: port},
 		{Text: "", Widget: lan},
@@ -239,9 +251,13 @@ func (u *ui) connect() {
 	if s.AutoReconnect && s.Failover {
 		backups = u.store.Backups(p)
 	}
+	// The kill switch keeps the internet blocked from a drop until the
+	// tunnel is back, so the connection keeps being retried until the user
+	// ends it, whatever the reconnect settings say.
+	guarded := s.KillSwitch && s.Mode == profile.ModeTUN && !isMobile
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan struct{})
-	u.cancel, u.done = cancel, done
+	u.cancel, u.done, u.guarded = cancel, done, guarded
 	u.health = health{}
 	u.setState(stateConnecting, pc.Name)
 
@@ -249,6 +265,9 @@ func (u *ui) connect() {
 
 	go func() {
 		defer close(done)
+		if guarded {
+			defer releaseKillSwitch(s) // before done: a connect that follows must not be released
+		}
 		var lastErr error
 		// Reconnecting is for a connection that was up and dropped. When the
 		// first attempt never comes up (a message entry, a taken port, a
@@ -295,7 +314,7 @@ func (u *ui) connect() {
 							u.setState(stateConnected, pc.Name)
 						}
 					})
-					if fails == healthFailsBeforeReconnect && s.AutoReconnect {
+					if fails == healthFailsBeforeReconnect && (s.AutoReconnect || guarded) {
 						u.logf("⚠️  no traffic through %s after %d checks; reconnecting", pc.Name, fails)
 						attemptCancel()
 					}
@@ -308,7 +327,10 @@ func (u *ui) connect() {
 			if ctx.Err() != nil {
 				return // the user disconnected
 			}
-			if !s.AutoReconnect || attempt >= maxReconnectAttempts || !everStarted.Load() {
+			// The kill switch blocks the internet until the tunnel is back:
+			// it keeps trying for as long as that takes.
+			retry := guarded || (s.AutoReconnect && attempt < maxReconnectAttempts)
+			if !retry || !everStarted.Load() {
 				if lastErr != nil {
 					fyne.Do(func() { u.showError(lastErr) })
 				}
@@ -318,7 +340,7 @@ func (u *ui) connect() {
 			if err != nil {
 				u.logf("⚠️  %s stopped: %v", pc.Name, err)
 			}
-			if attempt >= failoverAfter && len(backups) > 0 {
+			if attempt >= failoverAfter && len(backups) > 0 && !notTheServer(err) {
 				// This account failed again after a reconnect: carry on with
 				// the best of the others instead of retrying it ten times.
 				cur, curID, backups = backups[0], backups[0].ID, backups[1:]
@@ -336,7 +358,7 @@ func (u *ui) connect() {
 					}
 				})
 			} else {
-				u.logf("🔄 reconnecting to %s in %s (attempt %d of %d)", pc.Name, wait, attempt+1, maxReconnectAttempts)
+				u.logf("🔄 reconnecting to %s in %s (attempt %d)", pc.Name, wait, attempt+1)
 			}
 			name := cur.Name
 			fyne.Do(func() {
@@ -398,6 +420,23 @@ var runConnection = func(ctx context.Context, p profile.Profile, s profile.Setti
 	return engine.Run(ctx, p, s, hooks)
 }
 
+// notTheServer reports whether err would stop any account from connecting
+// (another VPN holds the traffic): moving to another one fixes nothing. The
+// helper's errors arrive as text.
+func notTheServer(err error) bool {
+	return err != nil && strings.Contains(err.Error(), engine.ErrOtherVPN.Error())
+}
+
+// releaseKillSwitch lifts the kill switch where runConnection runs the
+// connection: in the helper, or in this process. Tests replace this.
+var releaseKillSwitch = func(s profile.Settings) {
+	if s.Mode == profile.ModeTUN && !isElevated() && !isMobile {
+		elevate.ReleaseKillSwitch()
+		return
+	}
+	engine.ReleaseKillSwitch()
+}
+
 // disconnect stops the running connection and calls then once it has fully closed.
 func (u *ui) disconnect(then func()) {
 	if u.cancel == nil {
@@ -434,6 +473,9 @@ func (u *ui) setState(st connState, name string) {
 		text := "Connecting to " + name + "…"
 		if st == stateReconnecting {
 			text = "Connection lost; reconnecting to " + name + "…"
+			if u.guarded {
+				text += " The kill switch blocks the internet until it's back."
+			}
 		}
 		u.statusLabel.SetText(text)
 		u.statusLabel.Importance = widget.MediumImportance
@@ -576,6 +618,17 @@ func (u *ui) newSessionBox(relayout func()) fyne.CanvasObject {
 // sessionRefreshInterval is how often the traffic counters update; tests
 // make it long, so the background refresh doesn't race the test driver.
 var sessionRefreshInterval = time.Second
+
+// killSwitchHint says what the kill switch does, and what it still lets out
+// on this system.
+func killSwitchHint() string {
+	text := "After a drop, nothing reaches the internet until the tunnel is back: MKConnect keeps " +
+		"reconnecting until you press Disconnect, and only then lets traffic out without it."
+	if runtime.GOOS == "windows" {
+		return text + " The local network (printers, the router's page) is blocked too while it is on."
+	}
+	return text + " The local network stays reachable."
+}
 
 func tunPrivilegeHint() string {
 	switch runtime.GOOS {

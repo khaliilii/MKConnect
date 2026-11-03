@@ -83,7 +83,12 @@ func newRunCmd() *cobra.Command {
 			defer stop()
 
 			id := p.ID
-			return engine.Run(ctx, *p, s, engine.Hooks{
+			// A kill switch outlives a connection that drops: until the user
+			// stops it (Ctrl+C), nothing gets out without the tunnel.
+			defer engine.ReleaseKillSwitch()
+			started := false
+			err = engine.Run(ctx, *p, s, engine.Hooks{
+				OnStarted: func(*engine.Session) { started = true },
 				OnHostKey: func(key string) {
 					saved, err := store.Find(id)
 					if err != nil {
@@ -95,6 +100,12 @@ func newRunCmd() *cobra.Command {
 					}
 				},
 			})
+			if err != nil && started && engine.KillSwitchEngaged() {
+				log.Printf("❌ %v", err)
+				log.Printf("🔒 the kill switch keeps the internet blocked; press Ctrl+C to end it")
+				<-ctx.Done()
+			}
+			return err
 		},
 	}
 	f := cmd.Flags()

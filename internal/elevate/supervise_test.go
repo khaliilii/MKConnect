@@ -7,7 +7,9 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/khaliilii/MKConnect/internal/profile"
 )
@@ -116,5 +118,47 @@ func TestResumedHelperRunsTheRequest(t *testing.T) {
 	serve(dir, true)
 	if st, _ := readStatus(dir); st.Seq == 5 || st.State != stateExited {
 		t.Errorf("a request stopped meanwhile was run: %+v", st)
+	}
+}
+
+// TestHelperReleasesTheKillSwitch: the helper lifts the kill switch when the
+// app says the user ended the connection, and when it exits; not before.
+func TestHelperReleasesTheKillSwitch(t *testing.T) {
+	stdout, stderr := os.Stdout, os.Stderr
+	defer func() { os.Stdout, os.Stderr = stdout, stderr }()
+	old := releaseKillSwitch
+	defer func() { releaseKillSwitch = old }()
+	var releases atomic.Int32
+	releaseKillSwitch = func() { releases.Add(1) }
+
+	dir := helperDir(t, 0, profile.DefaultSettings())
+	done := make(chan error, 1)
+	go func() { done <- serve(dir, false) }()
+	waitUntil(t, func() bool { st, err := readStatus(dir); return err == nil && st.State == stateIdle })
+	if n := releases.Load(); n != 0 {
+		t.Fatalf("released %d times while idle", n)
+	}
+	os.WriteFile(filepath.Join(dir, "release"), nil, 0o600)
+	waitUntil(t, func() bool { return releases.Load() == 1 })
+	if _, err := os.Stat(filepath.Join(dir, "release")); err == nil {
+		t.Error("the release request is still there")
+	}
+	os.WriteFile(filepath.Join(dir, "quit"), nil, 0o600)
+	if err := <-done; err != nil {
+		t.Fatal(err)
+	}
+	if n := releases.Load(); n != 2 {
+		t.Errorf("released %d times in all, want 2 (asked, exit)", n)
+	}
+}
+
+func waitUntil(t *testing.T, cond func() bool) {
+	t.Helper()
+	deadline := time.Now().Add(5 * time.Second)
+	for !cond() {
+		if time.Now().After(deadline) {
+			t.Fatal("timed out")
+		}
+		time.Sleep(20 * time.Millisecond)
 	}
 }

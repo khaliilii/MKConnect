@@ -7,6 +7,8 @@ import (
 	"os/exec"
 	"path/filepath"
 	"time"
+
+	"github.com/khaliilii/MKConnect/internal/killswitch"
 )
 
 // The elevated process supervises the helper rather than being it: a crash
@@ -64,6 +66,16 @@ func Supervise(dir string) error {
 	}
 	defer logFile.Close()
 	log.SetOutput(logFile)
+
+	// A helper that crashed holding the kill switch left it: once none runs
+	// any more, nothing must stay blocked.
+	defer func() {
+		if left, err := killswitch.Cleanup(); err != nil {
+			log.Printf("⚠️  %v", err)
+		} else if left {
+			log.Printf("🔓 removed the kill switch the TUN helper left")
+		}
+	}()
 
 	var crashes []time.Time
 	for resume := false; ; resume = true {

@@ -22,6 +22,7 @@ import (
 	"github.com/khaliilii/MKConnect/internal/applog"
 	"github.com/khaliilii/MKConnect/internal/elevate"
 	"github.com/khaliilii/MKConnect/internal/engine"
+	"github.com/khaliilii/MKConnect/internal/killswitch"
 	"github.com/khaliilii/MKConnect/internal/profile"
 )
 
@@ -90,6 +91,8 @@ type ui struct {
 	health health
 	cancel context.CancelFunc
 	done   chan struct{}
+	// guarded: the running connection has the kill switch on.
+	guarded bool
 
 	connectBtn    *widget.Button
 	statusLabel   *widget.Label
@@ -137,6 +140,7 @@ func Run(icon []byte) {
 
 	u.build()
 	u.checkLeftoverDNS()
+	u.checkLeftoverKillSwitch()
 	u.autoUpdateSubscriptions()
 	// Like Hiddify: pick up share links copied while the app was in the background.
 	a.Lifecycle().SetOnEnteredForeground(u.checkClipboard)
@@ -263,6 +267,44 @@ func (u *ui) save() {
 	if err := u.store.Save(); err != nil {
 		u.showError(fmt.Errorf("save profiles: %w", err))
 	}
+}
+
+// RemoveKillSwitchFlag makes the executable remove a kill switch an
+// interrupted connection left (run with administrator rights).
+const RemoveKillSwitchFlag = "--remove-kill-switch"
+
+// checkLeftoverKillSwitch notices a kill switch a connection that couldn't
+// clean up left on (the helper was killed with the app): until it is
+// removed, nothing reaches the internet, so the app says so and offers to.
+func (u *ui) checkLeftoverKillSwitch() {
+	if !killswitch.Leftover() {
+		return
+	}
+	u.logf("⚠️  an interrupted connection left its kill switch on: nothing reaches the internet")
+	if runtime.GOOS != "darwin" {
+		dialog.ShowInformation("The internet is blocked",
+			"An interrupted connection left its kill switch on, so nothing reaches the internet. "+
+				"Connecting in TUN mode removes it, and so does: sudo mkconnect cleanup", u.win)
+		return
+	}
+	msg := "An interrupted connection left its kill switch on, so nothing reaches the internet. " +
+		"Remove it now? macOS will ask for your password."
+	dialog.ShowConfirm("Remove the kill switch", msg, func(ok bool) {
+		if !ok {
+			return
+		}
+		go func() {
+			_, err := elevate.RunElevated("MKConnect needs administrator rights to remove the kill switch.", RemoveKillSwitchFlag)
+			fyne.Do(func() {
+				if err != nil {
+					u.showError(fmt.Errorf("could not remove the kill switch: %w", err))
+					return
+				}
+				u.logf("🔓 removed the kill switch an interrupted connection left")
+				dialog.ShowInformation("Kill switch removed", "The internet works again.", u.win)
+			})
+		}()
+	}, u.win)
 }
 
 // RepairDNSFlag makes the executable put back a DNS setting left by an

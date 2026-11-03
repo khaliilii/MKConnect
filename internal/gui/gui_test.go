@@ -417,6 +417,119 @@ func TestAutoReconnectAfterDrop(t *testing.T) {
 	}
 }
 
+// TestNoFailoverForAnotherVPN: while another VPN holds the traffic no account
+// can connect, so the connection keeps to its account instead of moving on.
+func TestNoFailoverForAnotherVPN(t *testing.T) {
+	if raceEnabled {
+		t.Skip("background fyne.Do callbacks aren't serialized by the Fyne test driver")
+	}
+	u := newTestUI(t)
+	u.store.Settings.AutoReconnect, u.store.Settings.Failover = true, true
+	ps := u.store.Profiles
+	ps[2].Test = &profile.TestResult{Sent: 3, Received: 3, Latency: 120, Speed: 1 << 20}
+	u.store.Active = ps[0].ID
+	first := ps[0].ID
+
+	oldRun, oldDelay := runConnection, reconnectDelay
+	defer func() { runConnection, reconnectDelay = oldRun, oldDelay }()
+	reconnectDelay = func(int) time.Duration { return time.Millisecond }
+	var mu sync.Mutex
+	var tried []string
+	runConnection = func(ctx context.Context, p profile.Profile, s profile.Settings, hooks engine.Hooks) error {
+		mu.Lock()
+		tried = append(tried, p.ID)
+		n := len(tried)
+		mu.Unlock()
+		if n == 1 {
+			hooks.OnStarted(engine.NewSession("singbox", []string{"TUN"}, p.Address(), nil))
+			return errors.New("core stopped: boom")
+		}
+		// As it comes from the helper: text.
+		return errors.New(engine.ErrOtherVPN.Error() + " (interface utun4). Disconnect it first")
+	}
+
+	u.connect()
+	waitFor(t, func() bool { return u.state == stateIdle })
+	mu.Lock()
+	defer mu.Unlock()
+	for _, id := range tried {
+		if id != first {
+			t.Fatalf("moved to another account: tried %v", tried)
+		}
+	}
+	if u.store.Active != first {
+		t.Errorf("the active account changed")
+	}
+}
+
+// TestKillSwitchKeepsReconnecting: with the kill switch the internet stays
+// blocked after a drop, so the connection is retried past the usual limit,
+// even with auto-reconnect off; the block is lifted once, when the user
+// disconnects, and not at any drop.
+func TestKillSwitchKeepsReconnecting(t *testing.T) {
+	if raceEnabled {
+		t.Skip("background fyne.Do callbacks aren't serialized by the Fyne test driver")
+	}
+	u := newTestUI(t)
+	s := &u.store.Settings
+	s.Mode, s.KillSwitch, s.AutoReconnect, s.Failover = profile.ModeTUN, true, false, false
+
+	oldRun, oldDelay, oldRelease := runConnection, reconnectDelay, releaseKillSwitch
+	defer func() { runConnection, reconnectDelay, releaseKillSwitch = oldRun, oldDelay, oldRelease }()
+	reconnectDelay = func(int) time.Duration { return time.Millisecond }
+	var releases atomic.Int32
+	releaseKillSwitch = func(profile.Settings) { releases.Add(1) }
+
+	var attempts atomic.Int32
+	runConnection = func(ctx context.Context, p profile.Profile, s profile.Settings, hooks engine.Hooks) error {
+		if attempts.Add(1) == 1 {
+			hooks.OnStarted(engine.NewSession("singbox", []string{"TUN"}, p.Address(), nil))
+		}
+		if attempts.Load() <= maxReconnectAttempts+2 {
+			return errors.New("core stopped: the server is gone")
+		}
+		<-ctx.Done()
+		return nil
+	}
+
+	u.connect()
+	waitFor(t, func() bool { return attempts.Load() > maxReconnectAttempts+2 })
+	if n := releases.Load(); n != 0 {
+		t.Fatalf("the kill switch was lifted %d times while reconnecting", n)
+	}
+	u.disconnect(nil)
+	waitFor(t, func() bool { return u.state == stateIdle })
+	if n := releases.Load(); n != 1 {
+		t.Fatalf("the kill switch was lifted %d times after the disconnect, want 1", n)
+	}
+}
+
+// TestKillSwitchNeverUp: a connection with the kill switch that never comes
+// up isn't retried (it would only repeat its error), and lifts the block.
+func TestKillSwitchNeverUp(t *testing.T) {
+	if raceEnabled {
+		t.Skip("background fyne.Do callbacks aren't serialized by the Fyne test driver")
+	}
+	u := newTestUI(t)
+	s := &u.store.Settings
+	s.Mode, s.KillSwitch = profile.ModeTUN, true
+
+	oldRun, oldRelease := runConnection, releaseKillSwitch
+	defer func() { runConnection, releaseKillSwitch = oldRun, oldRelease }()
+	var releases, attempts atomic.Int32
+	releaseKillSwitch = func(profile.Settings) { releases.Add(1) }
+	runConnection = func(context.Context, profile.Profile, profile.Settings, engine.Hooks) error {
+		attempts.Add(1)
+		return errors.New("administrator permission was not granted")
+	}
+
+	u.connect()
+	waitFor(t, func() bool { return u.state == stateIdle && releases.Load() == 1 })
+	if n := attempts.Load(); n != 1 {
+		t.Errorf("attempted %d times, want 1", n)
+	}
+}
+
 // TestFailoverToBackup: an account that keeps failing is replaced by the
 // fastest working account of its group, skipping one that bills extra.
 func TestFailoverToBackup(t *testing.T) {

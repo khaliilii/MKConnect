@@ -91,6 +91,13 @@ A multi-account client for **SSH, VMess, VLESS, Trojan, Shadowsocks, Hysteria2 a
 - **Block QUIC** (TUN mode, on by default): HTTP/3 over UDP rides on the server's TCP connection through the
   tunnel and stalls, and browsers wait before falling back; refused, they use TCP at once. Iranian sites keep it.
   `mkconnect settings set block-quic false`
+- **kill switch** (TUN mode, off by default): from a drop until the tunnel is back, nothing reaches the
+  internet, so no app's traffic leaves without the tunnel while MKConnect reconnects, fails over to another
+  account or the core crashes. MKConnect then keeps reconnecting until you press Disconnect, which lifts the
+  block (so does quitting the app). It is the system's own firewall (pf on macOS, nftables on Linux, WFP on
+  Windows): what still gets out is the tunnel, the cores' own connections (the server, Iranian sites going out
+  directly), DHCP and, on macOS and Linux, name lookups and the local network; Windows blocks the local network
+  too, and doesn't combine it with an external core or gateway sharing. `mkconnect settings set kill-switch true`
 - **log files**: every run's complete log (the app's messages, the cores' output and a crash report if it
   crashes) is saved to a `logs` folder next to the program, or, where that can't be written (Program Files,
   a macOS app bundle, /usr/bin), to the user's config folder (`%AppData%\mkconnect\logs`,
@@ -113,7 +120,8 @@ it can clean up (a crash, a power cut), the app notices the leftover DNS setting
 
 Disconnecting restores the network configuration exactly (interfaces, routes, policy rules, firewall,
 IP forwarding, DNS). If MKConnect is killed while connected, the next TUN connection undoes what it left
-behind, or run `sudo mkconnect cleanup`. `scripts/test-tun-linux.sh` checks all of this end to end: that
+behind (a kill switch left on included: the app also offers to remove it at start), or run
+`sudo mkconnect cleanup`. `scripts/test-tun-linux.sh` checks all of this end to end: that
 the system's own traffic and DNS go through the tunnel, and that the configuration is identical before and
 after connecting, after gateway sharing and after a crash.
 
@@ -153,6 +161,7 @@ mkconnect settings set direct-iran false            # Iranian sites through the 
 mkconnect settings set mux true                     # many connections over one (Xray Mux.Cool)
 mkconnect settings set fake-dns false               # TUN: real DNS lookups through the tunnel instead of FakeIP
 mkconnect settings set block-quic false             # TUN: let QUIC (HTTP/3) through the tunnel
+mkconnect settings set kill-switch true             # TUN: no internet while the tunnel is down
 mkconnect settings set test-sites youtube.com,linkedin.com   # sites the speed test opens ("default", or "" for none)
 
 # external core
@@ -220,6 +229,9 @@ The APK is a native app (Kotlin, Compose) on the same Go core, with what the des
   the list by latency or speed
 - every setting that means anything on a phone: VPN or proxy mode, port, LAN sharing with a proxy password,
   tunnel DNS, IPv6, auto-reconnect, clipboard import, log level, VPN stack and MTU
+- the **kill switch** where Android keeps it: the VPN stays up while the app reconnects, and the settings open
+  Android's VPN settings for "Always-on VPN" and "Block connections without VPN", which block the internet
+  also when the app is stopped
 - a **log screen** with a filter, a follow switch, copy and clear, showing the core's log and the connection's
   own messages (health checks, reconnects)
 - the connection checked as on the desktop: the latency when traffic gets through, "no internet" with the reason

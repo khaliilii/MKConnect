@@ -2,6 +2,7 @@
 package cli
 
 import (
+	"errors"
 	"fmt"
 	"os"
 
@@ -9,6 +10,7 @@ import (
 	"golang.org/x/term"
 
 	"github.com/khaliilii/MKConnect/internal/gateway"
+	"github.com/khaliilii/MKConnect/internal/killswitch"
 	"github.com/khaliilii/MKConnect/internal/profile"
 	"github.com/khaliilii/MKConnect/internal/recovery"
 	"github.com/khaliilii/MKConnect/internal/version"
@@ -94,6 +96,11 @@ func newCleanupCmd() *cobra.Command {
 		Short: "Undo network changes left by a crashed TUN connection (run as root/Administrator)",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			cleaned, err := recovery.Recover()
+			if left, kerr := killswitch.Cleanup(); kerr != nil {
+				err = errors.Join(err, kerr)
+			} else if left {
+				cleaned = append(cleaned, "the kill switch (the internet works again)")
+			}
 			for _, c := range cleaned {
 				fmt.Println("🧹 removed:", c)
 			}

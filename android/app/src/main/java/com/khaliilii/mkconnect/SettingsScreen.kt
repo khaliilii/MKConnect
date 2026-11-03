@@ -1,5 +1,6 @@
 package com.khaliilii.mkconnect
 
+import android.content.Intent
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -28,6 +29,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 
@@ -114,6 +116,7 @@ fun SettingsScreen(options: Options, status: Status, onMessage: (String) -> Unit
                 "Block QUIC (HTTP/3): apps use TCP, which the tunnel carries much better",
                 s.blockQuic,
             ) { save(s.copy(blockQuic = it)) }
+            KillSwitch(onMessage)
         }
         SwitchRow(
             "Add share links found on the clipboard when the app opens",
@@ -151,6 +154,27 @@ fun SettingsScreen(options: Options, status: Status, onMessage: (String) -> Unit
         }
         Hint("Changes apply on the next connect.")
     }
+}
+
+/**
+ * The kill switch on Android is the system's: an app can't block the
+ * network by itself, but Android can, for every app, while no VPN is up.
+ * MKConnect keeps its VPN interface while it reconnects, so traffic waits
+ * then; this covers the rest (MKConnect stopped or crashed).
+ */
+@Composable
+private fun KillSwitch(onMessage: (String) -> Unit) {
+    val context = LocalContext.current
+    Text("Kill switch", fontWeight = FontWeight.SemiBold)
+    Hint(
+        "While MKConnect reconnects, its VPN stays up, so no app's traffic leaves without it. " +
+            "To block the internet also when MKConnect is stopped or fails, turn on \"Always-on VPN\" " +
+            "and \"Block connections without VPN\" for MKConnect in Android's VPN settings."
+    )
+    TextButton({
+        runCatching { context.startActivity(Intent(android.provider.Settings.ACTION_VPN_SETTINGS)) }
+            .onFailure { onMessage("This phone has no VPN settings screen to open") }
+    }) { Text("Open Android's VPN settings") }
 }
 
 /** What the running connection is made of, as the desktop session box shows it. */

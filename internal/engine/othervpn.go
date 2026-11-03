@@ -1,6 +1,7 @@
 package engine
 
 import (
+	"errors"
 	"fmt"
 	"net"
 	"strings"
@@ -48,19 +49,28 @@ var knownVPNApps = []string{"hiddify", "nekoray", "nekobox", "sing-box", "clash"
 // When the routes can't be read, the connection goes ahead.
 func checkOtherVPN() error {
 	iface, err := tunnelDefaultRoute()
+	// An interface that already has our tunnel address is just as bad: the
+	// routes "via <address>" would lead into it instead of into our TUN.
+	own := interfaceWithAddress(tunAddresses(true))
 	if err != nil || iface == "" {
-		// An interface that already has our tunnel address is just as bad: the
-		// routes "via <address>" would lead into it instead of into our TUN.
-		if iface = interfaceWithAddress(tunAddresses(true)); iface == "" {
+		if iface = own; iface == "" {
 			return nil
 		}
 	}
-	msg := fmt.Sprintf("another VPN is active (interface %s)", iface)
+	if iface == own {
+		return fmt.Errorf("%w (interface %s): it is MKConnect's own tunnel, of an earlier connection that is still up. "+
+			"Quit MKConnect completely and open it again", ErrOtherVPN, iface)
+	}
+	msg := fmt.Sprintf("interface %s", iface)
 	if apps := runningVPNApps(); len(apps) > 0 {
 		msg += ", probably " + strings.Join(apps, " or ")
 	}
-	return fmt.Errorf("%s. Disconnect it first: while it runs the system traffic stays on it and MKConnect can't take it over", msg)
+	return fmt.Errorf("%w (%s). Disconnect it first: while it runs the system traffic stays on it and MKConnect can't take it over", ErrOtherVPN, msg)
 }
+
+// ErrOtherVPN means another tunnel holds the system's traffic: no account
+// of MKConnect's can connect in TUN mode until it is gone.
+var ErrOtherVPN = errors.New("another VPN is active")
 
 // interfaceWithAddress returns the interface that has one of the addresses.
 func interfaceWithAddress(addrs []string) string {

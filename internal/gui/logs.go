@@ -75,7 +75,7 @@ func (u *ui) newLogView() fyne.CanvasObject {
 	go func() {
 		for range time.Tick(logRefreshInterval) {
 			if u.logs.takeDirty() {
-				fyne.Do(u.refreshAllLogs)
+				u.do(u.refreshAllLogs)
 			}
 		}
 	}()
@@ -198,7 +198,7 @@ func (u *ui) logPanel(parent fyne.Window, expanded bool) (fyne.CanvasObject, fun
 		toolsRow.Refresh()
 		go func() {
 			time.Sleep(2 * time.Second)
-			fyne.Do(func() {
+			u.do(func() {
 				btn.SetText("Copy")
 				btn.SetIcon(theme.ContentCopyIcon())
 				toolsRow.Refresh()

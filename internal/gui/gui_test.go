@@ -373,6 +373,23 @@ func TestLogViewFilterLevelAndDetail(t *testing.T) {
 	}
 }
 
+// TestNoUIWorkWhileQuitting: background work reaches the UI until the app
+// quits; Fyne would then run it off the UI thread, so it is dropped.
+func TestNoUIWorkWhileQuitting(t *testing.T) {
+	u := newTestUI(t)
+	ran := 0
+	u.do(func() { ran++ })
+	if ran != 1 {
+		t.Fatalf("ran %d times before quitting, want 1", ran)
+	}
+	u.quitting.Store(true)
+	defer u.quitting.Store(false)
+	u.do(func() { ran++ })
+	if ran != 1 {
+		t.Error("ran while quitting")
+	}
+}
+
 // TestAutoReconnectAfterDrop drives the connection loop with a fake core: the
 // first attempt drops, the second one stays up and healthy.
 func TestAutoReconnectAfterDrop(t *testing.T) {

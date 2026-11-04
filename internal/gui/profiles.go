@@ -400,7 +400,7 @@ func (u *ui) updateSubscription(groupID string, interactive bool, done ...func(o
 	u.groupUpdateBtn.Disable()
 	go func() {
 		data, err := profile.FetchSubscriptionVia(url, proxy)
-		fyne.Do(func() {
+		u.do(func() {
 			u.groupUpdateBtn.Enable()
 			if err != nil {
 				u.logf("❌ subscription %s: %v", name, err)
@@ -461,7 +461,7 @@ func (u *ui) autoUpdateSubscriptions() {
 	check()
 	go func() {
 		for range time.Tick(30 * time.Minute) {
-			fyne.Do(check)
+			u.do(check)
 		}
 	}()
 }

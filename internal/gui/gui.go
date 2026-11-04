@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"fyne.io/fyne/v2"
@@ -43,7 +44,7 @@ type health struct {
 }
 
 // ui holds the application state. All fields are only touched on the Fyne
-// main goroutine; background work reports back through fyne.Do.
+// main goroutine; background work reports back through u.do.
 type ui struct {
 	app   fyne.App
 	win   fyne.Window
@@ -93,6 +94,8 @@ type ui struct {
 	done   chan struct{}
 	// guarded: the running connection has the kill switch on.
 	guarded bool
+	// quitting: the UI is going away (see do).
+	quitting atomic.Bool
 
 	connectBtn    *widget.Button
 	statusLabel   *widget.Label
@@ -113,11 +116,14 @@ func Run(icon []byte) {
 	}
 
 	a := app.NewWithID("com.khaliilii.mkconnect")
-	a.Lifecycle().SetOnStopped(elevate.Shutdown) // the privileged TUN helper, if any
 	res := fyne.NewStaticResource("icon.png", icon)
 	a.SetIcon(res)
 
 	u := &ui{app: a, logs: logs}
+	a.Lifecycle().SetOnStopped(func() {
+		u.quitting.Store(true) // the macOS menu's Quit doesn't come through u.quit
+		elevate.Shutdown()     // the privileged TUN helper, if any
+	})
 	u.win = a.NewWindow("MKConnect")
 	u.win.Resize(fyne.NewSize(1000, 680))
 
@@ -243,7 +249,7 @@ func (u *ui) setupTray(desk desktop.App, icon fyne.Resource) {
 // quit disconnects (waiting briefly for the cores to close) and exits.
 func (u *ui) quit() {
 	if u.cancel == nil {
-		u.app.Quit()
+		u.exit()
 		return
 	}
 	done := u.done
@@ -253,8 +259,24 @@ func (u *ui) quit() {
 		case <-done:
 		case <-time.After(5 * time.Second):
 		}
-		fyne.Do(u.app.Quit)
+		fyne.Do(u.exit)
 	}()
+}
+
+func (u *ui) exit() {
+	u.quitting.Store(true)
+	u.app.Quit()
+}
+
+// do runs f on the UI thread, for the app's background goroutines. It does
+// nothing once the app is quitting: Fyne's queue is stopped then, and
+// fyne.Do would run f right on the calling goroutine, off the UI thread.
+func (u *ui) do(f func()) {
+	fyne.Do(func() {
+		if !u.quitting.Load() {
+			f()
+		}
+	})
 }
 
 // logf writes to the log view (stdout/stderr are captured into it).
@@ -295,7 +317,7 @@ func (u *ui) checkLeftoverKillSwitch() {
 		}
 		go func() {
 			_, err := elevate.RunElevated("MKConnect needs administrator rights to remove the kill switch.", RemoveKillSwitchFlag)
-			fyne.Do(func() {
+			u.do(func() {
 				if err != nil {
 					u.showError(fmt.Errorf("could not remove the kill switch: %w", err))
 					return
@@ -329,7 +351,7 @@ func (u *ui) checkLeftoverDNS() {
 		}
 		go func() {
 			out, err := elevate.RunElevated("MKConnect needs administrator rights to restore your DNS settings.", RepairDNSFlag)
-			fyne.Do(func() {
+			u.do(func() {
 				if err != nil {
 					u.showError(fmt.Errorf("could not restore the DNS: %w", err))
 					return

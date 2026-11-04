@@ -22,11 +22,13 @@ for arch in arm64 amd64; do
 		go build -trimpath -tags "$tags" -ldflags "$ldflags" -o "$work/cli-$arch" .
 done
 
-app=$out/MKConnect.app
-rm -rf "$app"
+# Everything is put together in $work and replaces dist/ only at the end: a
+# build that fails (a full disk) leaves the app that is there, which may be
+# the one running.
+app=$work/MKConnect.app
 mkdir -p "$app/Contents/MacOS" "$app/Contents/Resources"
 lipo -create -output "$app/Contents/MacOS/MKConnect" "$work/gui-arm64" "$work/gui-amd64"
-lipo -create -output "$out/mkconnect" "$work/cli-arm64" "$work/cli-amd64"
+lipo -create -output "$work/mkconnect" "$work/cli-arm64" "$work/cli-amd64"
 
 iconset=$work/MKConnect.iconset
 mkdir -p "$iconset"
@@ -55,5 +57,8 @@ cat >"$app/Contents/Info.plist" <<PLIST
 PLIST
 
 codesign --force --deep --sign - "$app"
-(cd "$out" && rm -f MKConnect-macos-universal.zip && ditto -c -k --keepParent MKConnect.app MKConnect-macos-universal.zip)
-echo "done: $app, $out/mkconnect ($version)"
+(cd "$work" && ditto -c -k --keepParent MKConnect.app MKConnect-macos-universal.zip)
+
+rm -rf "$out/MKConnect.app"
+mv "$app" "$work/mkconnect" "$work/MKConnect-macos-universal.zip" "$out/"
+echo "done: $out/MKConnect.app, $out/mkconnect ($version)"

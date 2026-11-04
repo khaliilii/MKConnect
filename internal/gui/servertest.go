@@ -292,7 +292,7 @@ func (u *ui) runTests(idx []int, opts engine.TestOptions, then func()) {
 	tested := map[int]bool{} // accounts with a latency result
 	go func() {
 		testEngine(ctx, profiles, order, settings, opts, 8, func(n int, r *profile.TestResult) {
-			fyne.Do(func() {
+			u.do(func() {
 				done++
 				if p := u.findProfile(ids[n]); p != nil {
 					p.Test = r
@@ -313,7 +313,7 @@ func (u *ui) runTests(idx []int, opts engine.TestOptions, then func()) {
 				u.list.Refresh()
 			})
 		})
-		fyne.Do(func() {
+		u.do(func() {
 			cancel()
 			u.testCancel = nil
 			u.testBtn.Enable()

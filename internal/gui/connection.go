@@ -282,7 +282,7 @@ func (u *ui) connect() {
 			fails := 0
 			err := run(attemptCtx, pc, s, engine.Hooks{
 				OnHostKey: func(key string) {
-					fyne.Do(func() {
+					u.do(func() {
 						if saved, err := u.store.Find(id); err == nil {
 							saved.HostKey = key
 							u.save()
@@ -291,7 +291,7 @@ func (u *ui) connect() {
 				},
 				OnStarted: func(session *engine.Session) {
 					everStarted.Store(true)
-					fyne.Do(func() {
+					u.do(func() {
 						if u.done != done {
 							return
 						}
@@ -305,7 +305,7 @@ func (u *ui) connect() {
 					} else {
 						fails++
 					}
-					fyne.Do(func() {
+					u.do(func() {
 						if u.done != done {
 							return
 						}
@@ -332,7 +332,7 @@ func (u *ui) connect() {
 			retry := guarded || (s.AutoReconnect && attempt < maxReconnectAttempts)
 			if !retry || !everStarted.Load() {
 				if lastErr != nil {
-					fyne.Do(func() { u.showError(lastErr) })
+					u.do(func() { u.showError(lastErr) })
 				}
 				return
 			}
@@ -347,7 +347,7 @@ func (u *ui) connect() {
 				u.logf("🔀 %s keeps failing; switching to %s", pc.Name, cur.Name)
 				attempt = 0 // the next account starts its own count
 				nextID := curID
-				fyne.Do(func() {
+				u.do(func() {
 					if u.done != done {
 						return
 					}
@@ -361,7 +361,7 @@ func (u *ui) connect() {
 				u.logf("🔄 reconnecting to %s in %s (attempt %d)", pc.Name, wait, attempt+1)
 			}
 			name := cur.Name
-			fyne.Do(func() {
+			u.do(func() {
 				if u.done != done {
 					return
 				}
@@ -373,7 +373,7 @@ func (u *ui) connect() {
 				return
 			case <-time.After(wait):
 			}
-			fyne.Do(func() {
+			u.do(func() {
 				if u.done == done {
 					u.setState(stateConnecting, name)
 				}
@@ -382,7 +382,7 @@ func (u *ui) connect() {
 	}()
 	go func() {
 		<-done
-		fyne.Do(func() {
+		u.do(func() {
 			if u.done == done {
 				u.cancel, u.done, u.session = nil, nil, nil
 				u.health = health{}
@@ -451,7 +451,7 @@ func (u *ui) disconnect(then func()) {
 	go func() {
 		<-done
 		if then != nil {
-			fyne.Do(then)
+			u.do(then)
 		}
 	}()
 }
@@ -609,7 +609,7 @@ func (u *ui) newSessionBox(relayout func()) fyne.CanvasObject {
 	u.refreshSession = refresh
 	go func() {
 		for range time.Tick(sessionRefreshInterval) {
-			fyne.Do(refresh)
+			u.do(refresh)
 		}
 	}()
 	return box

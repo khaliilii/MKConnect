@@ -237,6 +237,13 @@ func startPrivate(ctx context.Context, p *profile.Profile, s *profile.Settings) 
 	s.Mode, s.ListenPort, s.AllowLAN, s.ShareInterfaces = profile.ModeProxy, port, false, nil
 	s.ProxyUser, s.ProxyPass = "", ""
 	s.Core = PreferredCore(p, s)
+	if s.Core == profile.CoreXray {
+		own := *p // the pin is for this test, not the stored account
+		if err := pinPresentedCert(ctx, &own); err != nil {
+			return 0, "", nil, err
+		}
+		p = &own
+	}
 	if p.Type == profile.TypeSSH && p.HostKey == "" {
 		key, err := FetchHostKey(ctx, *p)
 		if err != nil {

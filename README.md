@@ -98,6 +98,10 @@ A multi-account client for **SSH, VMess, VLESS, Trojan, Shadowsocks, Hysteria2 a
   Windows): what still gets out is the tunnel, the cores' own connections (the server, Iranian sites going out
   directly), DHCP and, on macOS and Linux, name lookups and the local network; Windows blocks the local network
   too, and doesn't combine it with an external core or gateway sharing. `mkconnect settings set kill-switch true`
+- **the core follows the account**: what a core can't run comes first, then what runs best. An account that
+  skips the certificate check (allowInsecure) stays on sing-box, because Xray removed that mode; with a pinned
+  hash (pcs) Xray checks the pin instead. xhttp, which only Xray has, runs pinned to the certificate its server
+  presents at each connection
 - **log files**: every run's complete log (the app's messages, the cores' output and a crash report if it
   crashes) is saved to a `logs` folder next to the program, or, where that can't be written (Program Files,
   a macOS app bundle, /usr/bin), to the user's config folder (`%AppData%\mkconnect\logs`,

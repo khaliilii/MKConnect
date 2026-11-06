@@ -155,7 +155,7 @@ func (pf *profileFlags) register(f *pflag.FlagSet) {
 	f.StringVar(&p.TLS.SNI, "sni", "", "TLS server name")
 	f.StringVar(&pf.alpn, "alpn", "", "comma-separated ALPN list")
 	f.StringVar(&p.TLS.Fingerprint, "fp", "", "uTLS fingerprint, e.g. chrome")
-	f.BoolVar(&p.TLS.Insecure, "insecure", false, "skip TLS certificate verification (sing-box only)")
+	f.BoolVar(&p.TLS.Insecure, "insecure", false, "skip TLS certificate verification")
 	f.StringVar(&p.TLS.RealityPublicKey, "pbk", "", "REALITY public key")
 	f.StringVar(&p.TLS.RealityShortID, "sid", "", "REALITY short id")
 }

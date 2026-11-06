@@ -221,6 +221,15 @@ func Test(ctx context.Context, p profile.Profile, s profile.Settings, o TestOpti
 //     page's connections failing, no page loads although traffic flows
 //     (measured from Iran: 3-5 of 10 requests on sing-box, 8-10 on Xray).
 //
+// Those are preferences. What a core can't run comes first, and no preference
+// overrides it: a core is only ever chosen for an account it can start.
+//
+//   - Xray can't run Hysteria2 and TUIC, or skip the certificate check
+//     (allowInsecure) without a pinned hash: such accounts stay on sing-box,
+//     whatever their transport.
+//   - sing-box can't run xhttp. An xhttp account that skips the check runs on
+//     Xray, pinned to the certificate its server presents (pinPresentedCert).
+//
 // Xray's proxy port serves HTTP as well as SOCKS5, so nothing changes for the
 // apps that use it.
 func PreferredCore(p *profile.Profile, s *profile.Settings) string {
@@ -229,8 +238,16 @@ func PreferredCore(p *profile.Profile, s *profile.Settings) string {
 		return core
 	}
 	quic := p.Type == profile.TypeHysteria2 || p.Type == profile.TypeTUIC
-	if core == profile.CoreXray && (quic || startXray == nil) && startSingBox != nil {
+	xhttp := p.Transport.Network == "xhttp"
+	xrayCan := startXray != nil && !quic && (xhttp || !skipsCertCheck(p))
+	singBoxCan := startSingBox != nil && !xhttp
+	switch {
+	case xrayCan && !singBoxCan:
+		return profile.CoreXray
+	case singBoxCan && !xrayCan:
 		return profile.CoreSingBox
+	case !xrayCan:
+		return core // neither: starting it says why
 	}
 	httpHeader := p.Transport.HeaderType == "http" && (p.Transport.Network == "" || p.Transport.Network == "tcp")
 	// Not gRPC: Xray's gRPC client doesn't work with sing-box's own gRPC
@@ -241,7 +258,7 @@ func PreferredCore(p *profile.Profile, s *profile.Settings) string {
 	// sing-box's multiplexing doesn't speak Xray's Mux.Cool, which the
 	// servers do.
 	mux := s.Mux && MuxApplies(p)
-	if core == profile.CoreSingBox && (httpFront || httpHeader || pinned || mux || startSingBox == nil) && startXray != nil {
+	if core == profile.CoreSingBox && (httpFront || httpHeader || pinned || mux) {
 		return profile.CoreXray
 	}
 	return core

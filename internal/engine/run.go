@@ -242,6 +242,11 @@ func start(ctx context.Context, p *profile.Profile, s *profile.Settings) ([]Engi
 		core Engine
 		err  error
 	)
+	if p.Type != profile.TypeSSH {
+		if err := pinPresentedCert(ctx, p); err != nil {
+			return nil, err
+		}
+	}
 	switch {
 	case p.Type == profile.TypeSSH:
 		// Xray has no SSH outbound; use the built-in client.
@@ -371,6 +376,8 @@ func coreReason(p *profile.Profile, s *profile.Settings) string {
 	switch {
 	case p.Type == profile.TypeHysteria2 || p.Type == profile.TypeTUIC:
 		return p.Type + " needs sing-box"
+	case skipsCertCheck(p) && p.Transport.Network != "xhttp":
+		return "the account skips the certificate check, which only sing-box still can"
 	case p.Transport.Network == "xhttp":
 		return "the xhttp transport needs Xray"
 	case s.Mux && MuxApplies(p):

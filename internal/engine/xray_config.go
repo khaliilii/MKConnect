@@ -128,8 +128,9 @@ func xrayStream(p *profile.Profile) (obj, error) {
 	case "":
 		stream["security"] = "none"
 	case "tls":
-		if tls.Insecure {
-			return nil, fmt.Errorf("xray no longer supports insecure TLS (allowInsecure was removed), use the sing-box core")
+		// With a pinned hash the pin decides: Xray checks nothing else.
+		if skipsCertCheck(p) {
+			return nil, fmt.Errorf("xray can't skip the certificate check (allowInsecure was removed from it): turn it off for %s, or pin the certificate's hash (pcs)", p.Name)
 		}
 		s := obj{"serverName": orDefault(tls.SNI, p.Server)}
 		if len(tls.ALPN) > 0 {

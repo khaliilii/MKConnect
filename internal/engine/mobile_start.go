@@ -3,6 +3,7 @@
 package engine
 
 import (
+	"context"
 	"errors"
 	"fmt"
 
@@ -30,6 +31,9 @@ func StartMobile(p profile.Profile, s profile.Settings, vpn bool, logFile string
 	}
 
 	if err := p.Validate(); err != nil {
+		return nil, "", err
+	}
+	if err := pinPresentedCert(context.Background(), &p); err != nil {
 		return nil, "", err
 	}
 	cfg, err := xrayConfig(&p, &s)

@@ -25,13 +25,16 @@ import (
 	"fyne.io/fyne/v2/widget"
 
 	"github.com/khaliilii/MKConnect/internal/engine"
+	"github.com/khaliilii/MKConnect/internal/gateway"
 	"github.com/khaliilii/MKConnect/internal/profile"
 )
 
 // The test driver can't serialize background refreshes with the tests, so
 // the session box's ticker effectively never fires (set once: a running
 // ticker goroutine of an earlier test still reads the variable).
-func init() { sessionRefreshInterval, logRefreshInterval = time.Hour, time.Hour }
+func init() {
+	sessionRefreshInterval, logRefreshInterval, networkCheckInterval = time.Hour, time.Hour, time.Hour
+}
 
 // newTestUI builds the main window on Fyne's headless test driver.
 func newTestUI(t *testing.T) *ui {
@@ -373,6 +376,51 @@ func TestLogViewFilterLevelAndDetail(t *testing.T) {
 	}
 }
 
+// TestNetworkCardsFollowTheSystem: a card that appears, goes away or gets
+// another address while the app runs shows in the settings by itself, and a
+// chosen card that went away stays chosen, marked, until it is back.
+func TestNetworkCardsFollowTheSystem(t *testing.T) {
+	old := interfacesNow
+	defer func() { interfacesNow = old }()
+	cards := []gateway.Interface{{Name: "en0", Addrs: []string{"192.168.1.10/24"}}}
+	interfacesNow = func() ([]gateway.Interface, error) { return cards, nil }
+
+	u := newTestUI(t)
+	u.store.Settings.ShareInterfaces = []string{"en1"}
+	state := networkState()
+	cards = append(cards, gateway.Interface{Name: "en1", Addrs: []string{"192.168.2.1/24"}})
+	state = u.checkNetwork(state)
+	if got := u.shareCheck.Options; len(got) != 2 || got[1] != "en1 (192.168.2.1/24)" {
+		t.Fatalf("a new card: %q", got)
+	}
+	if got := u.shareCheck.Selected; len(got) != 1 || got[0] != "en1 (192.168.2.1/24)" {
+		t.Fatalf("selected: %q", got)
+	}
+
+	cards = cards[:1] // the chosen card goes away
+	state = u.checkNetwork(state)
+	if got := u.shareCheck.Selected; len(got) != 1 || got[0] != "en1 (not available)" {
+		t.Fatalf("a chosen card that went away: %q", got)
+	}
+	u.shareCheck.SetSelected(u.shareCheck.Selected) // another change must not lose it
+	if got := u.store.Settings.ShareInterfaces; len(got) != 1 || got[0] != "en1" {
+		t.Fatalf("the choice: %q", got)
+	}
+
+	cards = append(cards[:1:1], gateway.Interface{Name: "en1", Addrs: []string{"10.0.0.5/24"}}) // back, another address
+	u.checkNetwork(state)
+	if got := u.shareCheck.Selected; len(got) != 1 || got[0] != "en1 (10.0.0.5/24)" {
+		t.Fatalf("back with a new address: %q", got)
+	}
+
+	refreshed := false
+	refresh := u.refreshNetwork
+	u.refreshNetwork = func() { refreshed = true; refresh() }
+	if state = networkState(); u.checkNetwork(state) != state || refreshed {
+		t.Error("refreshed with nothing changed")
+	}
+}
+
 // TestNoUIWorkWhileQuitting: background work reaches the UI until the app
 // quits; Fyne would then run it off the UI thread, so it is dropped.
 func TestNoUIWorkWhileQuitting(t *testing.T) {
@@ -519,6 +567,45 @@ func TestKillSwitchKeepsReconnecting(t *testing.T) {
 	if n := releases.Load(); n != 1 {
 		t.Fatalf("the kill switch was lifted %d times after the disconnect, want 1", n)
 	}
+}
+
+// TestKillSwitchStaysWhileSwitching: moving to another account doesn't lift
+// the kill switch; moving to one without it, or ending, does.
+func TestKillSwitchStaysWhileSwitching(t *testing.T) {
+	if raceEnabled {
+		t.Skip("background fyne.Do callbacks aren't serialized by the Fyne test driver")
+	}
+	u := newTestUI(t)
+	s := &u.store.Settings
+	s.Mode, s.KillSwitch = profile.ModeTUN, true
+
+	oldRun, oldRelease := runConnection, releaseKillSwitch
+	defer func() { runConnection, releaseKillSwitch = oldRun, oldRelease }()
+	var releases, attempts atomic.Int32
+	releaseKillSwitch = func(profile.Settings) { releases.Add(1) }
+	runConnection = func(ctx context.Context, p profile.Profile, s profile.Settings, hooks engine.Hooks) error {
+		attempts.Add(1)
+		hooks.OnStarted(engine.NewSession("singbox", []string{"TUN"}, p.Address(), nil))
+		<-ctx.Done()
+		return nil
+	}
+
+	u.connect()
+	waitFor(t, func() bool { return u.state == stateConnected })
+	u.reconnect()
+	waitFor(t, func() bool { return attempts.Load() == 2 && u.state == stateConnected })
+	if n := releases.Load(); n != 0 {
+		t.Fatalf("lifted %d times while switching", n)
+	}
+
+	s.KillSwitch = false // the next account's connection runs without it
+	u.reconnect()
+	waitFor(t, func() bool { return attempts.Load() == 3 && u.state == stateConnected })
+	if n := releases.Load(); n != 1 {
+		t.Fatalf("lifted %d times moving to no kill switch, want 1", n)
+	}
+	u.disconnect(nil)
+	waitFor(t, func() bool { return u.state == stateIdle })
 }
 
 // TestKillSwitchNeverUp: a connection with the kill switch that never comes

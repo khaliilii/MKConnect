@@ -277,7 +277,7 @@ func TestStartTestWithoutAccounts(t *testing.T) {
 // which is exactly what the list has to be able to show.
 func TestStartTestRunsAndSaves(t *testing.T) {
 	newTestStore(t)
-	if _, err := Import("trojan://pw@127.0.0.1:1#dead"); err != nil {
+	if _, err := Import("trojan://pw@127.0.0.1:9#dead"); err != nil {
 		t.Fatal(err)
 	}
 	id := profilesOf(t)["profiles"].([]any)[0].(map[string]any)["id"].(string)

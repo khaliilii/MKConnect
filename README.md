@@ -102,6 +102,11 @@ A multi-account client for **SSH, VMess, VLESS, Trojan, Shadowsocks, Hysteria2 a
   skips the certificate check (allowInsecure) stays on sing-box, because Xray removed that mode; with a pinned
   hash (pcs) Xray checks the pin instead. xhttp, which only Xray has, runs pinned to the certificate its server
   presents at each connection
+- **macOS Internet Sharing**: its devices go through the tunnel too. Sharing sends them past the routing table
+  (its pf rule pins them to the interface it shares from), so while a TUN connection runs MKConnect's own pf rule
+  sends them into the tunnel; it follows sharing being turned on and off. Devices must not run their own VPN
+- **the settings follow the network**: network cards, their addresses and the addresses for other devices update
+  by themselves while the app runs; a chosen card that went away stays listed as "not available"
 - **log files**: every run's complete log (the app's messages, the cores' output and a crash report if it
   crashes) is saved to a `logs` folder next to the program, or, where that can't be written (Program Files,
   a macOS app bundle, /usr/bin), to the user's config folder (`%AppData%\mkconnect\logs`,

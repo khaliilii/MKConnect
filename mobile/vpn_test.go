@@ -38,7 +38,7 @@ func statusOf(t *testing.T) map[string]any {
 func connectableStore(t *testing.T) int {
 	t.Helper()
 	newTestStore(t)
-	if _, err := Import("ss://YWVzLTI1Ni1nY206cHc@127.0.0.1:1#dead"); err != nil {
+	if _, err := Import("ss://YWVzLTI1Ni1nY206cHc@127.0.0.1:9#dead"); err != nil {
 		t.Fatal(err)
 	}
 	l, err := net.Listen("tcp", "127.0.0.1:0")

@@ -96,6 +96,11 @@ type ui struct {
 	guarded bool
 	// quitting: the UI is going away (see do).
 	quitting atomic.Bool
+	// switching: the kill switch carries over to the next connection.
+	switching atomic.Bool
+
+	shareCheck     *widget.CheckGroup // the cards to share with
+	refreshNetwork func()             // redraws what depends on the network cards
 
 	connectBtn    *widget.Button
 	statusLabel   *widget.Label

@@ -119,9 +119,13 @@ func NewID() string {
 // IsInfo reports whether the "account" is a message a subscription sends in
 // an account's place (data used, days left, "update the app", which accounts
 // suit which network): its server is not a host name but text such as
-// "Asgard By ODIN", or a bare number such as "1111". Such entries are kept,
-// since their names carry the message, but can't be connected or tested.
+// "Asgard By ODIN", a bare number such as "1111", or any address on port 1
+// ("google.com:1", the panels' way of showing data left). Such entries are
+// kept, since their names carry the message, but can't be connected or tested.
 func (p *Profile) IsInfo() bool {
+	if p.Port == 1 {
+		return true
+	}
 	server := strings.TrimSpace(p.Server)
 	if strings.ContainsAny(server, " \t") {
 		return true

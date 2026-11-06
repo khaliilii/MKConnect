@@ -224,6 +224,9 @@ func TestPayloadOnlyAppliesToSSH(t *testing.T) {
 }
 
 func TestInfoEntries(t *testing.T) {
+	if p := (Profile{Server: "google.com", Port: 1}); !p.IsInfo() {
+		t.Error("google.com:1 is a panel's message, not a server")
+	}
 	banner := Profile{Name: "⏳Used: 47.61 GB  All: 100.0 GB", Type: TypeVMess, Server: "Asgard By ODIN", Port: 1111, UUID: "u"}
 	if !banner.IsInfo() {
 		t.Error("a subscription message entry was taken for a server")

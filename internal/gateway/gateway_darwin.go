@@ -8,7 +8,8 @@ import (
 	"github.com/khaliilii/MKConnect/internal/recovery"
 )
 
-// On macOS forwarded packets follow the TUN default routes into sing-box.
+// On macOS forwarded packets follow the TUN default routes into sing-box,
+// except Internet Sharing's: see FollowInternetSharing.
 func enable(s *Session, _ []string, _ string) error {
 	out, err := exec.Command("sysctl", "-n", "net.inet.ip.forwarding").Output()
 	if err != nil {

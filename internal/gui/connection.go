@@ -3,6 +3,7 @@ package gui
 import (
 	"context"
 	"fmt"
+	"net"
 	"runtime"
 	"slices"
 	"strconv"
@@ -78,22 +79,34 @@ func (u *ui) newConnectionPanel() fyne.CanvasObject {
 	shareHint.Importance = widget.LowImportance
 	shareHint.SizeName = theme.SizeNameCaptionText
 	loadInterfaces := func() {
-		ifaces, _ := gateway.Interfaces()
+		ifaces, _ := interfacesNow()
 		shareNames = map[string]string{}
 		var options, selected []string
+		found := map[string]bool{}
 		for _, ifc := range ifaces {
 			label := ifc.String()
 			shareNames[label] = ifc.Name
 			options = append(options, label)
+			found[ifc.Name] = true
 			if slices.Contains(s.ShareInterfaces, ifc.Name) {
 				selected = append(selected, label)
+			}
+		}
+		// A chosen card that went away stays in the list, ticked: the choice
+		// holds for when it comes back, and connecting without it fails, which
+		// a card that just vanished from the list wouldn't explain.
+		for _, name := range s.ShareInterfaces {
+			if !found[name] {
+				label := name + " (not available)"
+				shareNames[label] = name
+				options, selected = append(options, label), append(selected, label)
 			}
 		}
 		share.Options, share.Selected = options, selected
 		share.Refresh()
 	}
 	loadInterfaces()
-	refreshIfaces := widget.NewButtonWithIcon("", theme.ViewRefreshIcon(), loadInterfaces)
+	refreshIfaces := widget.NewButtonWithIcon("", theme.ViewRefreshIcon(), func() { u.refreshNetwork() })
 	shareBox := container.NewVBox(container.NewBorder(nil, nil, nil, refreshIfaces, share), shareHint)
 
 	port := entry(strconv.Itoa(s.ListenPort), "1080")
@@ -217,6 +230,18 @@ func (u *ui) newConnectionPanel() fyne.CanvasObject {
 	updateVisibility()
 	u.settingsBox = settings
 
+	u.shareCheck = share
+	u.refreshNetwork = func() {
+		loadInterfaces()
+		updateVisibility() // the sharing hint and the addresses for other devices
+	}
+	last := networkState() // what was just loaded: a change from here on counts
+	go func() {
+		for range time.Tick(networkCheckInterval) {
+			last = u.checkNetwork(last)
+		}
+	}()
+
 	u.statusLabel = widget.NewLabelWithStyle("Disconnected", fyne.TextAlignCenter, fyne.TextStyle{Bold: true})
 	u.connectBtn = widget.NewButtonWithIcon("Connect", theme.MediaPlayIcon(), u.toggleConnection)
 	u.connectBtn.Importance = widget.HighImportance
@@ -266,7 +291,13 @@ func (u *ui) connect() {
 	go func() {
 		defer close(done)
 		if guarded {
-			defer releaseKillSwitch(s) // before done: a connect that follows must not be released
+			// Before done: a connect that follows must not be released. Moving
+			// to another account isn't the end of the connection: see reconnect.
+			defer func() {
+				if !u.switching.Load() {
+					releaseKillSwitch(s)
+				}
+			}()
 		}
 		var lastErr error
 		// Reconnecting is for a connection that was up and dropped. When the
@@ -456,8 +487,20 @@ func (u *ui) disconnect(then func()) {
 	}()
 }
 
+// reconnect moves to the active account. The kill switch stays on from the
+// old connection to the new one: there is no moment without it. If no new
+// connection follows, or it runs without the kill switch, it is lifted here.
 func (u *ui) reconnect() {
-	u.disconnect(u.connect)
+	guarded := u.guarded && u.cancel != nil
+	u.switching.Store(guarded)
+	s := u.store.Settings
+	u.disconnect(func() {
+		u.connect()
+		u.switching.Store(false)
+		if guarded && (u.cancel == nil || !u.guarded) {
+			releaseKillSwitch(s)
+		}
+	})
 }
 
 func (u *ui) setState(st connState, name string) {
@@ -516,6 +559,33 @@ func (u *ui) setState(st connState, name string) {
 		u.trayConnect.Label = map[bool]string{true: "Connect", false: "Disconnect"}[st == stateIdle]
 		u.trayMenu.Refresh()
 	}
+}
+
+// Network cards come and go while the app runs (a cable, Wi-Fi, a hotspot,
+// another VPN). interfacesNow is replaced in tests; networkCheckInterval is how
+// often the app looks.
+var (
+	interfacesNow        = gateway.Interfaces
+	networkCheckInterval = 3 * time.Second
+)
+
+// networkState is what the settings show of the network, to compare: the cards
+// that can be shared and every address of this machine.
+func networkState() string {
+	ifaces, _ := interfacesNow()
+	addrs, _ := net.InterfaceAddrs()
+	return fmt.Sprint(ifaces, addrs)
+}
+
+// checkNetwork refreshes the settings if the network changed since last, and
+// returns the state now. It looks on the calling goroutine: reading the
+// interfaces is no work for the UI thread.
+func (u *ui) checkNetwork(last string) string {
+	now := networkState()
+	if now != last {
+		u.do(u.refreshNetwork)
+	}
+	return now
 }
 
 // lanAddresses tells the user what other devices should enter as their proxy.

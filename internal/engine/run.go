@@ -6,7 +6,9 @@ import (
 	"fmt"
 	"log"
 	"net"
+	"runtime"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/khaliilii/MKConnect/internal/gateway"
@@ -75,6 +77,7 @@ func Run(ctx context.Context, p profile.Profile, s profile.Settings, hooks Hooks
 		} else if len(cleaned) > 0 {
 			log.Printf("🧹 cleaned up after an earlier crash: %s", strings.Join(cleaned, ", "))
 		}
+		gateway.StopFollowingInternetSharing() // a crash may have left them
 		if left, err := killswitch.Cleanup(); err != nil {
 			log.Printf("⚠️  removing a kill switch an earlier connection left: %v", err)
 		} else if left {
@@ -134,6 +137,21 @@ func Run(ctx context.Context, p profile.Profile, s profile.Settings, hooks Hooks
 		}
 		if err != nil {
 			return err
+		}
+	}
+
+	if s.Mode == profile.ModeTUN && runtime.GOOS == "darwin" {
+		if tun, err := tunInterface(&s); err != nil {
+			log.Printf("⚠️  %v", err)
+		} else {
+			gw, _, _ := net.ParseCIDR(tunAddresses(false)[0])
+			following, stop := context.WithCancel(ctx)
+			finished := make(chan struct{})
+			go func() {
+				defer close(finished)
+				gateway.FollowInternetSharing(following, tun, gw.String())
+			}()
+			defer func() { stop(); <-finished }()
 		}
 	}
 
@@ -321,12 +339,9 @@ func pinServer(ctx context.Context, p *profile.Profile) ([]string, error) {
 	if ip := net.ParseIP(p.Server); ip != nil {
 		return []string{hostPrefix(ip)}, nil
 	}
-	addrs, err := net.DefaultResolver.LookupIPAddr(ctx, p.Server)
+	addrs, err := resolveServer(ctx, p.Server)
 	if err != nil {
-		return nil, fmt.Errorf("resolve %s: %w", p.Server, err)
-	}
-	if len(addrs) == 0 {
-		return nil, fmt.Errorf("resolve %s: no addresses", p.Server)
+		return nil, err
 	}
 	host := p.Server
 	// QUIC protocols always use TLS, whatever TLS.Mode says.
@@ -353,6 +368,42 @@ func pinServer(ctx context.Context, p *profile.Profile) ([]string, error) {
 		exclude = append(exclude, hostPrefix(a.IP))
 	}
 	return exclude, nil
+}
+
+// lookupHost is the system's resolver; replaced in tests.
+var lookupHost = net.DefaultResolver.LookupIPAddr
+
+// knownServers remembers the addresses each server last resolved to.
+var knownServers sync.Map // host -> []net.IPAddr
+
+// knownServerWait is how long a lookup may take when the answer is known.
+const knownServerWait = 5 * time.Second
+
+// resolveServer looks a server up. A network that has lost its DNS but not
+// its way to the server (after a drop, or while Internet Sharing restarts)
+// must not keep a connection down: the last answer stands in, and with one at
+// hand the lookup isn't waited for the 30 seconds the system takes to give up.
+func resolveServer(ctx context.Context, host string) ([]net.IPAddr, error) {
+	known, have := knownServers.Load(host)
+	lookup := ctx
+	if have {
+		var cancel context.CancelFunc
+		lookup, cancel = context.WithTimeout(ctx, knownServerWait)
+		defer cancel()
+	}
+	addrs, err := lookupHost(lookup, host)
+	if err == nil && len(addrs) == 0 {
+		err = errors.New("no addresses")
+	}
+	if err == nil {
+		knownServers.Store(host, addrs)
+		return addrs, nil
+	}
+	if have && ctx.Err() == nil {
+		log.Printf("⚠️  resolve %s: %v; using its last known address", host, err)
+		return known.([]net.IPAddr), nil
+	}
+	return nil, fmt.Errorf("resolve %s: %w", host, err)
 }
 
 func hostPrefix(ip net.IP) string {
